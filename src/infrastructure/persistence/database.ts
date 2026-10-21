@@ -80,14 +80,14 @@ export class MikroOrmDatabase implements TransactionRunner {
     }
   }
 
-  // Se o banco caiu no meio de uma transação, o rollback falha e o kysely (por baixo do MikroORM 7) não
-  // devolve aquela conexão ao pool: o release vem depois do await que lança. O pool.end() do pg espera
-  // as conexões emprestadas voltarem, então sem limite o desligamento ficaria preso nela para sempre.
+  // O pool.end() do pg espera as conexões emprestadas voltarem. Se o banco cai no meio de uma transação,
+  // o rollback (ou o BEGIN) falha, e sem o patch do kysely (patches/) aquela conexão nunca voltava. Com o
+  // patch ela volta; o limite fica como segunda proteção, para o desligamento nunca ficar preso nela.
   async close(): Promise<void> {
     const closed = this.orm.close().then(() => "closed" as const);
     const timedOut = Bun.sleep(POOL_CLOSE_TIMEOUT_MILLISECONDS).then(() => "timed_out" as const);
     if ((await Promise.race([closed, timedOut])) === "timed_out") {
-      logger.warn({ event: "database_close_timeout", waitedMilliseconds: POOL_CLOSE_TIMEOUT_MILLISECONDS }, "o pool não fechou a tempo: sobrou conexão emprestada de uma transação cortada pela rede; seguindo com o desligamento");
+      logger.warn({ event: "database_close_timeout", waitedMilliseconds: POOL_CLOSE_TIMEOUT_MILLISECONDS }, "o pool não fechou a tempo: sobrou conexão emprestada; seguindo com o desligamento");
     }
   }
 }

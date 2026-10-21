@@ -1,0 +1,36 @@
+diff --git a/dist/kysely.js b/dist/kysely.js
+index dfc66315db072f215f4a64cc86283dcc3848b376..5ce3d4f2a9ada9aa7eac906938dbba0d15ea112f 100644
+--- a/dist/kysely.js
++++ b/dist/kysely.js
+@@ -714,7 +714,13 @@ export class ControlledTransactionBuilder {
+         const settings = { isolationLevel, accessMode };
+         validateTransactionSettings(settings);
+         const connection = await provideControlledConnection(this.#props.executor);
+-        await this.#props.driver.beginTransaction(connection.connection, settings);
++        try {
++            await this.#props.driver.beginTransaction(connection.connection, settings);
++        }
++        catch (error) {
++            connection.release();
++            throw error;
++        }
+         return new ControlledTransaction({
+             ...props,
+             connection,
+@@ -804,9 +810,13 @@ export class ControlledTransaction extends Transaction {
+     rollback() {
+         assertNotCommittedOrRolledBack(this.#state);
+         return new Command(async () => {
+-            await this.#props.driver.rollbackTransaction(this.#props.connection.connection);
+-            this.#state.isRolledBack = true;
+-            this.#props.connection.release();
++            try {
++                await this.#props.driver.rollbackTransaction(this.#props.connection.connection);
++                this.#state.isRolledBack = true;
++            }
++            finally {
++                this.#props.connection.release();
++            }
+         });
+     }
+     /**

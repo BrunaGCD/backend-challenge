@@ -4,6 +4,7 @@ FROM oven/bun:1.4.3
 WORKDIR /app
 
 COPY package.json bun.lock ./
+COPY patches ./patches
 RUN bun install --frozen-lockfile
 
 COPY tsconfig.json eslint.config.js bunfig.toml ./

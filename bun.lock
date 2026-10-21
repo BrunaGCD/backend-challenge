@@ -28,6 +28,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "kysely@0.29.6": "patches/kysely@0.29.6.patch",
+  },
   "packages": {
     "@aws-sdk/client-sqs": ["@aws-sdk/client-sqs@3.1154.0", "", { "dependencies": { "@aws-sdk/core": "^3.978.4", "@aws-sdk/credential-provider-node": "^3.972.87", "@aws-sdk/middleware-sdk-sqs": "^3.972.45", "@aws-sdk/types": "^3.974.6", "@smithy/core": "^3.36.0", "@smithy/fetch-http-handler": "^5.8.0", "@smithy/node-http-handler": "^4.12.1", "@smithy/types": "^4.19.0", "tslib": "^2.6.2" } }, "sha512-938JVhom5x/KxcKqLvn3VfFLfF166VHsa93G9K/yqIzFYj2CITQ/pG/eIQZFQgzQVCZUoeNWrCLSMh6qKBi9ww=="],
 

@@ -132,4 +132,5 @@ src/
 test/
   unit/  integration/  concurrency/  support/
 experiments/         os roteiros dos experimentos E1 e E2, rodados antes da implementação
+patches/             patch do kysely aplicado pelo bun install (o porquê está no ARCHITECTURE.md, §18)
 ```

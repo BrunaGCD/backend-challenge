@@ -100,6 +100,25 @@ describe("PostgreSQL fora do ar", () => {
     const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id = ${bet.externalTransactionId}`;
     expect(counts.total).toBe(1);
   });
+
+  // O rollback de uma transação cortada pela rede falha, e o BEGIN numa conexão que acabou de morrer
+  // também. Sem o patch do kysely (patches/), nos dois casos a conexão nunca voltava ao pool.
+  test("transação cortada no meio: depois que o banco volta, nenhuma conexão fica emprestada no pool", async () => {
+    const pool = await app.application.orm.em.getConnection().getNativeClient();               // o pool do pg, por baixo do MikroORM e do kysely
+    const borrowedConnections = () => pool.totalCount - pool.idleCount;                         // abertas menos as paradas no pool
+    const database = app.application.database;
+
+    const cutInTheMiddle = database.run(async () => {
+      await database.transactionEntityManager().execute("select 1");                           // a transação está aberta nesta conexão
+      await databaseProxy.cut();                                                                // a rede cai no meio dela
+      await database.transactionEntityManager().execute("select 1");                           // falha, e o rollback que vem depois também
+    });
+    await expect(cutInTheMiddle).rejects.toThrow();
+
+    await databaseProxy.restore();
+    await waitUntil("nenhuma conexão emprestada no pool", () => borrowedConnections() === 0, 10_000);   // o publisher da outbox usa e devolve no meio do caminho
+    expect((await httpRequest(app.baseUrl, "GET", "/health/ready")).status).toBe(200);
+  });
 });
 
 describe("PostgreSQL de pé, mas sem as tabelas", () => {
