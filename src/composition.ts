@@ -11,7 +11,7 @@ import { OutboxPublisher } from "./application/outbox-publisher";
 import type { Clock, EventPublisher, IdGenerator, RandomSource, Repositories } from "./application/ports";
 import { ProcessWagerTransaction } from "./application/process-wager-transaction";
 import { WalletQueries } from "./application/queries";
-import type { AppConfig } from "./config";
+import { intervalMilliseconds, type AppConfig } from "./config";
 import type { RetryPolicy } from "./domain/backoff";
 import { BackgroundLoop } from "./infrastructure/background-loop";
 import { approximateNumberOfMessages, createSqsClient, QueueUrls, SqsEventPublisher, SqsInputQueue, type InputQueue } from "./infrastructure/messaging/sqs";
@@ -117,6 +117,8 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     waitTimeSeconds: config.sqs.waitTimeSeconds,
     retryPolicy: retryPolicy(config.consumer.retryBaseMilliseconds, config.consumer.retryCapMilliseconds, random),
     shutdownTimeoutMilliseconds: config.consumer.shutdownTimeoutMilliseconds,
+    visibilityTimeoutMilliseconds: config.sqs.visibilityTimeoutSeconds * 1_000,
+    longestMessageMilliseconds: intervalMilliseconds("DATABASE_BACKGROUND_STATEMENT_TIMEOUT", config.database.backgroundStatementTimeout),   // o máximo que uma mensagem espera no banco
   });
 
   // ----------------------------------------------------------------------------------------------------

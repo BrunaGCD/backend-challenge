@@ -6,6 +6,7 @@
 // (DATABASE_BACKGROUND_LOCK_TIMEOUT), e um teste mostra a diferença com a mesma wallet travada.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Repositories } from "../../src/application/ports";
+import type { InputQueue } from "../../src/infrastructure/messaging/sqs";                       // a fila de entrada, embrulhada para anotar recebimentos e devoluções
 import { createTestQueues, createWallet, drainQueue, httpRequest, sendWagerMessage, startInProcessApp, submitWager, testConfig, testSql, wagerMessage, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";
 
@@ -125,6 +126,71 @@ describe("fila", () => {
     expect(transaction.status).toBe("PROCESSED");
     expect(lockAttemptsByWallet.get(walletId)).toBe(attemptsBefore + 1);                         // uma tentativa só, sem lock_timeout
     expect(await metricValue("wagering_retries_total", '{component="sqs_consumer"}')).toBe(retriesBefore);
+  });
+
+  // Visibilidade de 3 s e statement_timeout de 2,5 s nos testes: só cabe começar uma mensagem até 0,5 s
+  // depois do recebimento. A primeira do lote espera o lock por 1 s; as outras três já não cabem.
+  test("lote da mesma wallet com a wallet travada por fora: as mensagens que não cabem mais no prazo de visibilidade voltam com visibilidade 0 e são processadas no recebimento seguinte", async () => {
+    const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
+    touchedWallets.push(walletId);
+    const batchQueues = await createTestQueues("visibility");                                  // fila própria: o consumidor do arquivo não pega este lote
+    const messages = [1, 2, 3, 4].map(() => wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "BET", amount: "1.00" }));
+    for (const message of messages) await sendWagerMessage(batchQueues.inputQueueName, message);   // todas na fila antes do consumidor ligar: vêm num lote só
+
+    let releaseLock: () => void = () => {};
+    let lockHeld: () => void = () => {};
+    const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
+    const holder = testSql().begin(async (transaction) => {
+      await transaction`select id from wallets where id = ${walletId} for update`;
+      lockHeld();
+      await new Promise<void>((resolve) => { releaseLock = resolve; });
+    });
+    await lockHeldPromise;
+
+    const receives: { at: number; messages: { id: string; receiveCount: number }[] }[] = [];
+    const visibilityChanges: { at: number; id: string; seconds: number }[] = [];
+    const recordingQueue = (real: InputQueue): InputQueue => ({
+      async receive(maxMessages, waitTimeSeconds, abortSignal) {
+        const received = await real.receive(maxMessages, waitTimeSeconds, abortSignal);
+        if (received.length > 0) receives.push({ at: performance.now(), messages: received.map((message) => ({ id: message.sqsMessageId, receiveCount: message.receiveCount })) });
+        return received;
+      },
+      delete: (message) => real.delete(message),
+      async changeVisibility(message, seconds) {
+        visibilityChanges.push({ at: performance.now(), id: message.sqsMessageId, seconds });
+        await real.changeVisibility(message, seconds);
+      },
+      sendToDeadLetter: (message, reason) => real.sendToDeadLetter(message, reason),
+    });
+    const consumerApp = await startInProcessApp(testConfig(batchQueues, { OUTBOX_PUBLISHER_ENABLED: "false", PENDING_WORKER_ENABLED: "false" }), { inputQueue: recordingQueue });
+
+    await waitUntil("o primeiro lote chegar", () => receives.length > 0);
+    await Bun.sleep(1_000);                                                                     // a primeira espera o lock; o prazo das outras se esgota
+    releaseLock();
+    await holder;
+
+    const externalIds = messages.map((message) => message.data.externalTransactionId);
+    await waitUntil("as quatro processadas", async () => {
+      const [row] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id in ${testSql()(externalIds)} and status = 'PROCESSED'`;
+      return row.total === 4;
+    });
+    await consumerApp.stop();
+
+    const firstBatch = receives[0]!;
+    expect(firstBatch.messages).toHaveLength(4);                                                // o lote inteiro da mesma wallet num recebimento
+    const laterIds = firstBatch.messages.slice(1).map((message) => message.id);
+    expect(visibilityChanges.map((change) => change.id)).toEqual(laterIds);                     // só as três que não começaram
+    for (const change of visibilityChanges) {
+      expect(change.seconds).toBe(0);                                                           // voltam na hora, não com backoff
+      expect(change.at - firstBatch.at).toBeLessThan(3_000);                                    // antes de a visibilidade vencer sozinha
+    }
+    const secondReceiveCounts = receives.slice(1).flatMap((batch) => batch.messages).filter((message) => laterIds.includes(message.id)).map((message) => message.receiveCount);
+    expect(secondReceiveCounts).toEqual([2, 2, 2]);                                             // recebidas de novo uma vez cada, e processadas
+    const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id in ${testSql()(externalIds)}`;
+    expect(counts.total).toBe(4);                                                               // uma transação por mensagem
+    const [wallet] = await testSql()`select balance from wallets where id = ${walletId}`;
+    expect(wallet.balance).toBe("96.00");
+    expect(await drainQueue(batchQueues.deadLetterQueueName, 300)).toHaveLength(0);
   });
 
   test("a métrica de DLQ lê o tamanho da fila, inclusive o que o SQS moveu", async () => {

@@ -141,7 +141,7 @@ export function loadConfig(): AppConfig {
 // O statement_timeout precisa ser maior que o lock_timeout, senão corta a espera do lock antes dela.
 // E a transação da fila precisa caber na visibilidade da mensagem: se passar, a mensagem volta para a
 // fila no meio do processamento e gasta um recebimento à toa (não duplica nada, mas aproxima da DLQ).
-function intervalMilliseconds(name: string, text: string): number {
+export function intervalMilliseconds(name: string, text: string): number {
   const match = /^([0-9]+)(ms|s|min)?$/.exec(text);                                       // o formato que o PostgreSQL aceita e o database.ts confere
   if (!match) throw new Error(`${name} precisa ser um intervalo como 2s ou 500ms, veio "${text}"`);
   const value = Number(match[1]);

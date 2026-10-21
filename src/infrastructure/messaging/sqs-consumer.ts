@@ -20,6 +20,8 @@ export interface ConsumerSettings {
   waitTimeSeconds: number;
   retryPolicy: RetryPolicy;
   shutdownTimeoutMilliseconds: number;
+  visibilityTimeoutMilliseconds: number;                                                        // o prazo de cada recebimento, o mesmo da fila
+  longestMessageMilliseconds: number;                                                           // o statement_timeout da fila: o máximo que uma mensagem espera no banco
 }
 
 type HandleOutcome = "acknowledged" | "sent_to_dead_letter" | "retry_scheduled";
@@ -75,8 +77,10 @@ export class SqsConsumer {
     let consecutiveReceiveFailures = 0;
     while (!this.stopping) {
       let messages: ReceivedMessage[] = [];
+      let receivedAt = 0;
       try {
         messages = await this.queue.receive(MAX_MESSAGES_PER_RECEIVE, this.settings.waitTimeSeconds, this.receiveAbort.signal);
+        receivedAt = performance.now();                                                         // o prazo de visibilidade começa a contar aqui
         consecutiveReceiveFailures = 0;
       } catch (error) {
         if (this.stopping) break;                                                               // abortado pelo desligamento
@@ -86,27 +90,32 @@ export class SqsConsumer {
         await Bun.sleep(waitMilliseconds);
         continue;
       }
-      await this.processBatch(messages);
+      await this.processBatch(messages, receivedAt);
     }
   }
 
   // grupos diferentes em paralelo; dentro do grupo, em ordem
-  private async processBatch(messages: ReceivedMessage[]): Promise<void> {
+  private async processBatch(messages: ReceivedMessage[], receivedAt: number): Promise<void> {
     const messagesByGroup = new Map<string, ReceivedMessage[]>();
     for (const message of messages) {
       const group = messagesByGroup.get(message.groupId) ?? [];
       group.push(message);
       messagesByGroup.set(message.groupId, group);
     }
-    await Promise.all([...messagesByGroup.values()].map((group) => this.processGroup(group)));
+    await Promise.all([...messagesByGroup.values()].map((group) => this.processGroup(group, receivedAt)));
   }
 
-  private async processGroup(group: ReceivedMessage[]): Promise<void> {
+  private async processGroup(group: ReceivedMessage[], receivedAt: number): Promise<void> {
     for (let index = 0; index < group.length; index++) {
       const message = group[index]!;
       const remaining = group.slice(index + 1);
       if (this.stopping) {
         await this.releaseVisibility([message, ...remaining]);                                  // recebida e não iniciada: volta na hora
+        return;
+      }
+      if (!this.fitsInVisibility(receivedAt)) {
+        logger.info({ event: "sqs_visibility_running_out", released: 1 + remaining.length }, "o prazo de visibilidade não cabe mais uma espera inteira; as mensagens que faltam do grupo voltam para a fila");
+        await this.releaseVisibility([message, ...remaining]);                                  // voltam na hora, em vez de vencer no meio do processamento
         return;
       }
       const outcome = await this.handleSafely(message);
@@ -115,6 +124,14 @@ export class SqsConsumer {
         return;
       }
     }
+  }
+
+  // A visibilidade é contada a partir do recebimento, e as mensagens de uma wallet vão uma por vez. Se as
+  // primeiras demoraram esperando o lock, a próxima pode não caber no que sobrou: começar mesmo assim
+  // deixaria a mensagem voltar para a fila no meio, outra instância pegá-la, e o recebimento contar à toa.
+  private fitsInVisibility(receivedAt: number): boolean {
+    const elapsedMilliseconds = performance.now() - receivedAt;                                 // quanto do prazo já foi gasto
+    return elapsedMilliseconds + this.settings.longestMessageMilliseconds <= this.settings.visibilityTimeoutMilliseconds;   // cabe mais uma espera inteira?
   }
 
   private async releaseVisibility(messages: ReceivedMessage[]): Promise<void> {
