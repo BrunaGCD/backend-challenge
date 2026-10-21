@@ -75,6 +75,8 @@ export function testEnvironment(queues: TestQueues, extra: Record<string, string
     SQS_WAIT_TIME_SECONDS: "1",
     SQS_VISIBILITY_TIMEOUT_SECONDS: "3",
     SQS_MAX_RECEIVE_COUNT: "3",
+    DATABASE_BACKGROUND_LOCK_TIMEOUT: "2s",                                                     // abaixo da visibilidade de 3 s dos testes
+    DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "2500ms",
     CONSUMER_RETRY_BASE_MS: "200",
     CONSUMER_RETRY_CAP_MS: "1000",
     SHUTDOWN_IN_FLIGHT_TIMEOUT_MS: "5000",

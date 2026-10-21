@@ -65,9 +65,12 @@ describe("cenário 5: worker morto depois do commit e antes do ack", () => {
 });
 
 describe("cenário 8: reinício no meio da carga, com consistência final comprovada", () => {
-  test("SIGKILL numa das 3 instâncias durante a carga, a instância volta, e nada se perde nem duplica", async () => {
-    const queues = await createTestQueues("restart", { visibilityTimeoutSeconds: 3, maxReceiveCount: 5, waitTimeSeconds: 1 });   // maxReceiveCount de produção
-    const instances = [await start("load-1", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" }), await start("load-2", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" }), await start("load-3", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" })];
+  test("SIGKILL numa das 3 instâncias durante a carga: cada operação enviada vira exatamente uma transação, nenhuma vai para a DLQ, e o saldo de cada wallet bate", async () => {
+    // maxReceiveCount e espera do lock da fila de produção; visibilidade de 20 s (30 em produção) para o
+    // teste não demorar, acima dos 15 s de statement_timeout da fila
+    const queues = await createTestQueues("restart", { visibilityTimeoutSeconds: 20, maxReceiveCount: 5, waitTimeSeconds: 1 });
+    const productionLike = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "5", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
+    const instances = [await start("load-1", queues, undefined, productionLike), await start("load-2", queues, undefined, productionLike), await start("load-3", queues, undefined, productionLike)];
     const wallets = [];
     for (let index = 0; index < 5; index++) {
       const wallet = await createWallet(instances[0]!.baseUrl, "1000.00");
@@ -110,7 +113,7 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
         killed = true;
         killedInstances.push(instances[1]!);                                                    // guarda a saída para o diagnóstico
         await stopInstance(instances[1]!, "SIGKILL");                                           // morre no meio do trabalho
-        instances[1] = await start("load-2-restarted", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" });                                 // e volta
+        instances[1] = await start("load-2-restarted", queues, undefined, productionLike);       // e volta
       }
       if (index % 10 === 0) await Bun.sleep(20);                                                // espalha a carga no tempo
     }
@@ -122,9 +125,9 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
       return row.total === 0;
     }, 30_000);
 
-    // Toda operação enviada terminou num destes dois lugares: virou exatamente uma transação, ou está na
-    // DLQ, movida pelo próprio SQS depois do maxReceiveCount (a instância morta conta um recebimento, e
-    // falhas transitórias sob carga contam os outros). A fila de entrada já está vazia aqui.
+    // Toda operação enviada virou exatamente uma transação e nada foi para a DLQ. A instância morta gasta
+    // um recebimento das mensagens que tinha em mãos, e a fila espera o lock até 10 s, então sobram
+    // recebimentos de folga. Se algo faltar, o log de cada mensagem sai abaixo para o diagnóstico.
     const recordedIds = new Set((await testSql()`select external_transaction_id from wager_transactions where wallet_id in ${testSql()(wallets.map((wallet) => wallet.walletId))}`).map((row: any) => row.external_transaction_id as string));
     const missing = sent.filter((operation) => !recordedIds.has(operation.input.externalTransactionId!));
     const deadLetters = await drainQueue(queues.deadLetterQueueName, 1000);
@@ -136,14 +139,14 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
         console.log("operação sem transação:", JSON.stringify({ externalTransactionId: operation.input.externalTransactionId, channel: operation.channel, inDeadLetter: deadLetteredIds.has(operation.input.externalTransactionId!), logs }));
       }
     }
-    expect(missing.filter((operation) => !deadLetteredIds.has(operation.input.externalTransactionId!))).toEqual([]);   // nada sumiu
-    expect(deadLetters.every((message) => message.attributes.reason === undefined)).toBe(true);  // só redrive do SQS, nenhum erro permanente
-    console.log(`cenário 8: ${sent.length - missing.length} transações, ${missing.length} operações só na DLQ`);
+    console.log(`cenário 8: ${sent.length - missing.length} transações, ${missing.length} operações sem transação, ${deadLetters.length} mensagens na DLQ`);
+    expect(missing).toEqual([]);                                                                // nada sumiu
+    expect(deadLetters).toHaveLength(0);                                                        // nenhuma operação válida desistida
 
     // nenhuma operação virou duas transações; o saldo esperado sai das que terminaram PROCESSED
     for (const wallet of wallets) {
       const rows = await testSql()`select external_transaction_id, kind, status, amount from wager_transactions where wallet_id = ${wallet.walletId} and kind <> 'OPENING'`;
-      const sentForWallet = sent.filter((operation) => operation.input.walletId === wallet.walletId && !deadLetteredIds.has(operation.input.externalTransactionId!));
+      const sentForWallet = sent.filter((operation) => operation.input.walletId === wallet.walletId);
       expect(rows.length).toBe(sentForWallet.length);
       let expectedCents = 1000_00n;
       for (const row of rows) {

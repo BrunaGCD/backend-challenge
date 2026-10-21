@@ -8,8 +8,10 @@ export interface AppConfig {
   database: {
     url: string;
     poolMax: number;
-    lockTimeout: string;                     // SET LOCAL lock_timeout de cada transação
-    statementTimeout: string;                // SET LOCAL statement_timeout de cada transação
+    lockTimeout: string;                     // SET LOCAL lock_timeout das transações do HTTP: alguém espera a resposta
+    statementTimeout: string;                // SET LOCAL statement_timeout das transações do HTTP
+    backgroundLockTimeout: string;           // o mesmo para a fila, o worker e o publisher: ninguém espera resposta, então espera mais
+    backgroundStatementTimeout: string;
     idleInTransactionTimeoutMilliseconds: number;
     connectTimeoutMilliseconds: number;
   };
@@ -76,13 +78,15 @@ function readBoolean(name: string, fallback: boolean): boolean {
 }
 
 export function loadConfig(): AppConfig {
-  return {
+  const config: AppConfig = {
     port: readInteger("PORT", 3000),
     database: {
       url: readString("DATABASE_URL", "postgresql://wagering:wagering@localhost:5432/wagering"),
       poolMax: readInteger("DATABASE_POOL_MAX", 20),
       lockTimeout: readString("DATABASE_LOCK_TIMEOUT", "2s"),
       statementTimeout: readString("DATABASE_STATEMENT_TIMEOUT", "5s"),
+      backgroundLockTimeout: readString("DATABASE_BACKGROUND_LOCK_TIMEOUT", "10s"),
+      backgroundStatementTimeout: readString("DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "15s"),
       idleInTransactionTimeoutMilliseconds: readInteger("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS", 10_000),
       connectTimeoutMilliseconds: readInteger("DATABASE_CONNECT_TIMEOUT_MS", 3_000),
     },
@@ -127,4 +131,32 @@ export function loadConfig(): AppConfig {
     ledgerPage: { defaultLimit: readInteger("LEDGER_PAGE_DEFAULT_LIMIT", 50), maxLimit: readInteger("LEDGER_PAGE_MAX_LIMIT", 100) },
     logLevel: readString("LOG_LEVEL", "info"),
   };
+  assertTimeoutOrder(config);
+  return config;
+}
+
+// ----------------------------------------------------------------------------------------------------
+//                       A ORDEM DOS TIMEOUTS: ESPERA DO LOCK < COMANDO < VISIBILIDADE
+// ----------------------------------------------------------------------------------------------------
+// O statement_timeout precisa ser maior que o lock_timeout, senão corta a espera do lock antes dela.
+// E a transação da fila precisa caber na visibilidade da mensagem: se passar, a mensagem volta para a
+// fila no meio do processamento e gasta um recebimento à toa (não duplica nada, mas aproxima da DLQ).
+function intervalMilliseconds(name: string, text: string): number {
+  const match = /^([0-9]+)(ms|s|min)?$/.exec(text);                                       // o formato que o PostgreSQL aceita e o database.ts confere
+  if (!match) throw new Error(`${name} precisa ser um intervalo como 2s ou 500ms, veio "${text}"`);
+  const value = Number(match[1]);
+  if (match[2] === "min") return value * 60_000;
+  if (match[2] === "s") return value * 1_000;
+  return value;                                                                                 // sem unidade, o PostgreSQL lê milissegundos
+}
+
+function assertTimeoutOrder(config: AppConfig): void {
+  const httpLock = intervalMilliseconds("DATABASE_LOCK_TIMEOUT", config.database.lockTimeout);
+  const httpStatement = intervalMilliseconds("DATABASE_STATEMENT_TIMEOUT", config.database.statementTimeout);
+  const backgroundLock = intervalMilliseconds("DATABASE_BACKGROUND_LOCK_TIMEOUT", config.database.backgroundLockTimeout);
+  const backgroundStatement = intervalMilliseconds("DATABASE_BACKGROUND_STATEMENT_TIMEOUT", config.database.backgroundStatementTimeout);
+  const visibility = config.sqs.visibilityTimeoutSeconds * 1_000;
+  if (httpLock >= httpStatement) throw new Error("DATABASE_LOCK_TIMEOUT precisa ser menor que DATABASE_STATEMENT_TIMEOUT");
+  if (backgroundLock >= backgroundStatement) throw new Error("DATABASE_BACKGROUND_LOCK_TIMEOUT precisa ser menor que DATABASE_BACKGROUND_STATEMENT_TIMEOUT");
+  if (backgroundStatement >= visibility) throw new Error("DATABASE_BACKGROUND_STATEMENT_TIMEOUT precisa ser menor que SQS_VISIBILITY_TIMEOUT_SECONDS");
 }

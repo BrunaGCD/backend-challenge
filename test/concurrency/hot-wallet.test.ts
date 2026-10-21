@@ -13,9 +13,14 @@ let queues: TestQueues;
 let instances: Instance[] = [];
 let hotWalletId = "";
 
+// maxReceiveCount e espera do lock da fila de produção; a visibilidade fica em 20 s (30 em produção) só
+// para o teste não demorar, e continua acima dos 15 s de statement_timeout da fila
+const PRODUCTION_LIKE_QUEUE = { visibilityTimeoutSeconds: 20, maxReceiveCount: 5, waitTimeSeconds: 1 };
+const PRODUCTION_LIKE_ENVIRONMENT = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "5", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
+
 beforeAll(async () => {
-  queues = await createTestQueues("hot", { visibilityTimeoutSeconds: 3, maxReceiveCount: 5, waitTimeSeconds: 1 });   // maxReceiveCount de produção
-  const environment = testEnvironment(queues, { PENDING_REFERENCE_TTL_MS: "8000", SQS_MAX_RECEIVE_COUNT: "5" });
+  queues = await createTestQueues("hot", PRODUCTION_LIKE_QUEUE);
+  const environment = testEnvironment(queues, { PENDING_REFERENCE_TTL_MS: "8000", ...PRODUCTION_LIKE_ENVIRONMENT });
   instances = await Promise.all(["hot-1", "hot-2", "hot-3"].map((name) => spawnInstance(name, environment)));
 });
 
@@ -28,7 +33,7 @@ function amountText(cents: number): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
-test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet só", async () => {
+test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet só: cada operação única vira exatamente uma transação, nenhuma vai para a DLQ, e saldo, ledger e reconciliação batem", async () => {
   const { walletId, playerId } = await createWallet(instances[0]!.baseUrl, "1000.00");
   hotWalletId = walletId;
   const random = seededRandom(42);
@@ -85,18 +90,17 @@ test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet s�
   const rows = await testSql()`select t.external_transaction_id, t.kind, t.status, t.amount, r.kind as reference_kind
                                  from wager_transactions t left join wager_transactions r on r.id = t.reference_transaction_id
                                 where t.wallet_id = ${walletId} and t.kind <> 'OPENING'`;
-  // Toda operação única terminou num destes dois lugares: virou transação (uma só, repetição não vira
-  // outra) ou está na DLQ. Com disputa forte pelo lock, uma mensagem da fila pode esgotar o
-  // maxReceiveCount em lock_timeout; aí o próprio SQS a move para a DLQ, sem nada gravado.
+  // Toda operação única virou exatamente uma transação (repetição não vira outra), e nenhuma mensagem
+  // válida foi para a DLQ: a fila espera o lock até 10 s, então a disputa não esgota o maxReceiveCount.
   const uniqueOperations = new Set(operations.map((operation) => operation.externalTransactionId!));
   const recorded = new Set(rows.map((row: any) => row.external_transaction_id as string));
   expect(recorded.size).toBe(rows.length);                                                      // nenhuma operação duplicada
   const deadLetters = await drainQueue(queues.deadLetterQueueName, 1000);
   const deadLetteredIds = new Set(deadLetters.map((message) => JSON.parse(message.body).data.externalTransactionId as string));
   const missing = [...uniqueOperations].filter((externalTransactionId) => !recorded.has(externalTransactionId));
-  expect(missing.filter((externalTransactionId) => !deadLetteredIds.has(externalTransactionId))).toEqual([]);   // nada sumiu
-  expect(deadLetters.every((message) => message.attributes.reason === undefined)).toBe(true);  // só redrive por transitório, nenhum erro permanente
-  console.log(`hot wallet: ${rows.length} transações, ${missing.length} operações só na DLQ (lock_timeout até o maxReceiveCount)`);
+  console.log(`hot wallet: ${rows.length} transações, ${missing.length} operações sem transação, ${deadLetters.length} mensagens na DLQ (${[...deadLetteredIds].join(", ") || "nenhuma"})`);
+  expect(missing).toEqual([]);                                                                  // nada sumiu
+  expect(deadLetters).toHaveLength(0);                                                          // nenhuma operação válida desistida
 
   let expectedCents = 1000_00n;
   for (const row of rows) {

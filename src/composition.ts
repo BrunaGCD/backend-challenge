@@ -41,7 +41,8 @@ export interface Application {
   sqsClient: SQSClient;
   queueUrls: QueueUrls;
   repositories: Repositories;
-  processWager: ProcessWagerTransaction;
+  processWager: ProcessWagerTransaction;                                                        // HTTP, com o lock_timeout curto
+  processWagerInBackground: ProcessWagerTransaction;                                            // fila e worker, com o lock_timeout longo
   createWallet: CreateWallet;
   queries: WalletQueries;
   outboxPublisher: OutboxPublisher;
@@ -70,7 +71,10 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
   //                                        PERSISTÊNCIA
   // ----------------------------------------------------------------------------------------------------
   const orm = await createOrm({ databaseUrl: config.database.url, poolMax: config.database.poolMax, idleInTransactionTimeoutMilliseconds: config.database.idleInTransactionTimeoutMilliseconds, connectTimeoutMilliseconds: config.database.connectTimeoutMilliseconds });
+  // dois runners sobre o mesmo pool: no HTTP alguém espera a resposta, então a espera pelo lock é curta
+  // (503 e o provedor reenvia); na fila e no worker ninguém espera, e desistir cedo gasta um recebimento
   const database = new MikroOrmDatabase(orm, { lockTimeout: config.database.lockTimeout, statementTimeout: config.database.statementTimeout });
+  const backgroundDatabase = new MikroOrmDatabase(orm, { lockTimeout: config.database.backgroundLockTimeout, statementTimeout: config.database.backgroundStatementTimeout });
   const realRepositories: Repositories = {
     wallets: new MikroOrmWalletRepository(database),
     transactions: new MikroOrmWagerTransactionRepository(database),
@@ -94,18 +98,20 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
   // ----------------------------------------------------------------------------------------------------
   //                                       CASOS DE USO
   // ----------------------------------------------------------------------------------------------------
-  const processWager = new ProcessWagerTransaction(database, repositories, clock, ids, {
+  const processWagerSettings = {
     pendingRetryPolicy: retryPolicy(config.pendingReference.retryBaseMilliseconds, config.pendingReference.retryCapMilliseconds, random),
     referenceTtlMilliseconds: config.pendingReference.ttlMilliseconds,
-  });
+  };
+  const processWager = new ProcessWagerTransaction(database, repositories, clock, ids, processWagerSettings);                    // HTTP
+  const processWagerInBackground = new ProcessWagerTransaction(backgroundDatabase, repositories, clock, ids, processWagerSettings);   // fila e worker: o mesmo caso de uso, com espera maior
   const createWallet = new CreateWallet(database, repositories, clock, ids);
   const queries = new WalletQueries(repositories, config.ledgerPage);
-  const outboxPublisher = new OutboxPublisher(database, repositories.outbox, eventPublisher, clock, {
+  const outboxPublisher = new OutboxPublisher(backgroundDatabase, repositories.outbox, eventPublisher, clock, {
     batchSize: config.outbox.batchSize,
     retryPolicy: retryPolicy(config.outbox.retryBaseMilliseconds, config.outbox.retryCapMilliseconds, random),
     stuckAfterAttempts: config.outbox.stuckAfterAttempts,
   });
-  const consumer = new SqsConsumer(inputQueue, processWager, {
+  const consumer = new SqsConsumer(inputQueue, processWagerInBackground, {
     consumerName: config.consumer.name,
     acceptedCurrencies: config.acceptedCurrencies,
     waitTimeSeconds: config.sqs.waitTimeSeconds,
@@ -125,7 +131,7 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
   }
   if (config.pendingReference.enabled) {
     backgroundLoops.push(new BackgroundLoop("pending_reference_worker", config.pendingReference.intervalMilliseconds, async () => {
-      const foundOne = await processWager.processNextDuePending();
+      const foundOne = await processWagerInBackground.processNextDuePending();
       return foundOne ? "run_again_now" : "wait";
     }));
   }
@@ -162,7 +168,7 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     return { shuttingDown: false, ready: postgres === "ok" && sqs === "ok", checks: { postgres, sqs } };
   }
 
-  return { config, orm, database, sqsClient, queueUrls, repositories, processWager, createWallet, queries, outboxPublisher, consumer, backgroundLoops, ids, shutdownState, checkReadiness };
+  return { config, orm, database, sqsClient, queueUrls, repositories, processWager, processWagerInBackground, createWallet, queries, outboxPublisher, consumer, backgroundLoops, ids, shutdownState, checkReadiness };
 }
 
 export function startBackgroundWork(application: Application): void {

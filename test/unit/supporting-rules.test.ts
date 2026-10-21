@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "../../src/application/infrastructure-errors";
 import { ConcurrentUpdateError, InvalidCursorError } from "../../src/application/errors";
+import { loadConfig } from "../../src/config";                                                  // ordem dos timeouts
 import { decodeLedgerCursor, encodeLedgerCursor } from "../../src/application/queries";
 import { fullJitterDelayMilliseconds } from "../../src/domain/backoff";
 import { WagerTransactionProcessed, WalletBalanceChanged } from "../../src/domain/events";
@@ -114,5 +115,39 @@ describe("eventos, outbox e inbox", () => {
     expect(inbox.isProcessed()).toBe(true);
     expect(inbox.isSameMessage("a".repeat(64))).toBe(true);
     expect(inbox.isSameMessage("b".repeat(64))).toBe(false);
+  });
+});
+
+describe("ordem dos timeouts na configuração", () => {
+  const TIMEOUT_VARIABLES = ["DATABASE_LOCK_TIMEOUT", "DATABASE_STATEMENT_TIMEOUT", "DATABASE_BACKGROUND_LOCK_TIMEOUT", "DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "SQS_VISIBILITY_TIMEOUT_SECONDS"];
+
+  function loadWith(environment: Record<string, string>) {
+    const previous = Object.fromEntries(TIMEOUT_VARIABLES.map((name) => [name, process.env[name]]));
+    for (const name of TIMEOUT_VARIABLES) delete process.env[name];                             // parte dos padrões do código
+    Object.assign(process.env, environment);
+    try {
+      return loadConfig();
+    } finally {
+      for (const name of TIMEOUT_VARIABLES) {
+        if (previous[name] === undefined) delete process.env[name];
+        else process.env[name] = previous[name];
+      }
+    }
+  }
+
+  test("os padrões: HTTP espera o lock 2 s, a fila e o worker 10 s, abaixo dos 30 s de visibilidade", () => {
+    const config = loadWith({});
+    expect(config.database).toMatchObject({ lockTimeout: "2s", statementTimeout: "5s", backgroundLockTimeout: "10s", backgroundStatementTimeout: "15s" });
+    expect(config.sqs.visibilityTimeoutSeconds).toBe(30);
+  });
+
+  test("a transação da fila que não cabe na visibilidade é recusada na subida", () => {
+    expect(() => loadWith({ SQS_VISIBILITY_TIMEOUT_SECONDS: "12" })).toThrow("DATABASE_BACKGROUND_STATEMENT_TIMEOUT precisa ser menor que SQS_VISIBILITY_TIMEOUT_SECONDS");
+  });
+
+  test("statement_timeout que cortaria a espera do lock é recusado", () => {
+    expect(() => loadWith({ DATABASE_BACKGROUND_LOCK_TIMEOUT: "20s" })).toThrow("DATABASE_BACKGROUND_LOCK_TIMEOUT precisa ser menor que DATABASE_BACKGROUND_STATEMENT_TIMEOUT");
+    expect(() => loadWith({ DATABASE_LOCK_TIMEOUT: "5000ms" })).toThrow("DATABASE_LOCK_TIMEOUT precisa ser menor que DATABASE_STATEMENT_TIMEOUT");
+    expect(() => loadWith({ DATABASE_LOCK_TIMEOUT: "dois segundos" })).toThrow("precisa ser um intervalo");
   });
 });

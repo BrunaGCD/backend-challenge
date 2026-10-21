@@ -2,7 +2,8 @@
 //    RETRY E DLQ: TRANSITÓRIO VOLTA COM BACKOFF; TRANSITÓRIO QUE NÃO PASSA VAI PARA A DLQ PELO SQS
 // ====================================================================================================
 // O erro transitório entra de dois jeitos: injetado na porta do repositório, e um lock_timeout de
-// verdade, com um teste segurando o lock da wallet por fora.
+// verdade, com um teste segurando o lock da wallet por fora. A fila espera o lock mais que o HTTP
+// (DATABASE_BACKGROUND_LOCK_TIMEOUT), e um teste mostra a diferença com a mesma wallet travada.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Repositories } from "../../src/application/ports";
 import { createTestQueues, createWallet, drainQueue, httpRequest, sendWagerMessage, startInProcessApp, submitWager, testConfig, testSql, wagerMessage, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
@@ -89,6 +90,41 @@ describe("fila", () => {
     expect(lockAttemptsByWallet.get(walletId)).toBe(3);                                          // maxReceiveCount = 3
     const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id = ${message.data.externalTransactionId}`;
     expect(counts.total).toBe(0);                                                               // DLQ não cria FAILED: nada foi gravado
+  });
+
+  test("a fila espera o lock mais que o HTTP: com a wallet travada por fora, o HTTP desiste com 503 e a mensagem espera e processa na primeira tentativa", async () => {
+    const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
+    touchedWallets.push(walletId);
+    const retriesBefore = await metricValue("wagering_retries_total", '{component="sqs_consumer"}');
+
+    let releaseLock: () => void = () => {};
+    let lockHeld: () => void = () => {};
+    const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
+    const holder = testSql().begin(async (transaction) => {
+      await transaction`select id from wallets where id = ${walletId} for update`;
+      lockHeld();
+      await new Promise<void>((resolve) => { releaseLock = resolve; });
+    });
+    await lockHeldPromise;
+
+    const httpBet = await submitWager(app.baseUrl, { walletId, playerId, kind: "BET", amount: "10.00" });   // espera 500 ms e desiste
+    expect(httpBet.status).toBe(503);
+
+    const attemptsBefore = lockAttemptsByWallet.get(walletId) ?? 0;
+    const message = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "BET", amount: "25.00" });
+    await sendWagerMessage(queues.inputQueueName, message);
+    await waitUntil("o consumidor começar a esperar o lock", () => (lockAttemptsByWallet.get(walletId) ?? 0) > attemptsBefore);
+    await Bun.sleep(1_000);                                                                     // o dobro do que o HTTP aguentou, e a mensagem continua esperando
+    releaseLock();
+    await holder;
+
+    const [transaction] = await waitUntil("a mensagem processada", async () => {
+      const rows = await testSql()`select status from wager_transactions where external_transaction_id = ${message.data.externalTransactionId}`;
+      return rows.length > 0 ? rows : undefined;
+    });
+    expect(transaction.status).toBe("PROCESSED");
+    expect(lockAttemptsByWallet.get(walletId)).toBe(attemptsBefore + 1);                         // uma tentativa só, sem lock_timeout
+    expect(await metricValue("wagering_retries_total", '{component="sqs_consumer"}')).toBe(retriesBefore);
   });
 
   test("a métrica de DLQ lê o tamanho da fila, inclusive o que o SQS moveu", async () => {
