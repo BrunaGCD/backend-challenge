@@ -61,6 +61,8 @@ export class InboxPayloadConflictError extends ApplicationError {
   readonly code = "INBOX_PAYLOAD_CONFLICT";                                                     // mesmo messageId com conteúdo diferente
 }
 
-export class WalletVersionConflictError extends ApplicationError {
-  readonly code = "INTERNAL_ERROR";                                                             // UPDATE com 0 linhas: é bug, aborta a transação
+// UPDATE com 0 linhas no flush (version da wallet ou status da pendente mudou depois da leitura).
+// Com o lock da linha isso não acontece; se acontecer é bug, e a transação inteira é desfeita.
+export class ConcurrentUpdateError extends ApplicationError {
+  readonly code = "INTERNAL_ERROR";
 }

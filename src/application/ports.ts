@@ -23,7 +23,9 @@ export interface RandomSource {
 }
 
 // Uma transação SQL por execução de caso de uso. Dentro de work, os repositórios usam o
-// EntityManager da transação, que chega pelo contexto.
+// EntityManager da transação, que chega pelo contexto. As escritas dos repositórios (insert, update*,
+// saveAttempt) só registram a mudança no Unit of Work: o SQL sai junto no commit, e é ali que aparecem
+// a violação de unicidade e o conflito de versão. A exceção é a inbox, que grava na hora.
 export interface TransactionRunner {
   run<T>(work: () => Promise<T>): Promise<T>;
 }
@@ -33,7 +35,7 @@ export interface WalletRepository {
   findByIdForUpdate(walletId: string): Promise<Wallet | undefined>;                             // SELECT ... FOR UPDATE
   findByPlayerAndCurrency(playerId: string, currency: string): Promise<Wallet | undefined>;
   insert(wallet: Wallet): Promise<void>;
-  updateBalance(wallet: Wallet, expectedVersion: number): Promise<void>;                        // WHERE version = expectedVersion
+  updateBalance(wallet: Wallet, expectedVersion: number): Promise<void>;                        // no commit: UPDATE ... WHERE version = expectedVersion
 }
 
 export interface WagerTransactionRepository {
@@ -62,7 +64,7 @@ export interface LedgerRepository {
 }
 
 export interface InboxRepository {
-  insertIfAbsent(message: InboxMessage): Promise<boolean>;                                      // ON CONFLICT DO NOTHING
+  insertIfAbsent(message: InboxMessage): Promise<boolean>;                                      // ON CONFLICT DO NOTHING, na hora
   find(consumerName: string, messageId: string): Promise<InboxMessage | undefined>;
 }
 

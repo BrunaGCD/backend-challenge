@@ -3,7 +3,7 @@
 // ====================================================================================================
 import { describe, expect, test } from "bun:test";
 import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "../../src/application/infrastructure-errors";
-import { InvalidCursorError } from "../../src/application/errors";
+import { ConcurrentUpdateError, InvalidCursorError } from "../../src/application/errors";
 import { decodeLedgerCursor, encodeLedgerCursor } from "../../src/application/queries";
 import { fullJitterDelayMilliseconds } from "../../src/domain/backoff";
 import { WagerTransactionProcessed, WalletBalanceChanged } from "../../src/domain/events";
@@ -51,6 +51,8 @@ describe("classificação de erros de infraestrutura", () => {
     expect(concurrencyConflictType(withCode("55P03"))).toBe("lock_timeout");
     expect(concurrencyConflictType(withCode("40P01"))).toBe("deadlock");
     expect(concurrencyConflictType(withCode("23505"))).toBe("unique_violation");
+    expect(concurrencyConflictType(new ConcurrentUpdateError("version mudou"))).toBe("optimistic_lock");                  // o conflito que o flush acusa
+    expect(isTransientInfrastructureError(new ConcurrentUpdateError("version mudou"))).toBe(false);                    // é bug, não vale repetir como transitório
     expect(uniqueViolationConstraint(withCode("23505", { constraint: "wager_transactions_idempotency_key_unique" }))).toBe("wager_transactions_idempotency_key_unique");
     expect(uniqueViolationConstraint(withCode("23514", { constraint: "x" }))).toBeUndefined();
   });

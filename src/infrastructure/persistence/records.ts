@@ -3,6 +3,8 @@
 // ====================================================================================================
 // O formato das linhas do banco. As classes de domínio não são mapeadas no ORM: os repositórios
 // convertem registro em objeto de domínio pela factory rehydrate. O schema real vem das migrations.
+// As chaves estrangeiras são relações manyToOne com mapToPk: o campo continua sendo o id (string), e
+// o Unit of Work usa a relação para inserir na ordem certa no flush (wallet, transação, lançamento).
 import { defineEntity, p } from "@mikro-orm/postgresql";                                       // construtor de registros
 
 export const WalletRecord = defineEntity({
@@ -13,7 +15,7 @@ export const WalletRecord = defineEntity({
     playerId: p.uuid(),
     currency: p.string().length(3),
     balance: p.decimal().precision(18).scale(2),                                                // volta como string, vai direto para Money.from
-    version: p.integer(),
+    version: p.integer().version(),                                                             // optimistic lock: UPDATE ... WHERE version = <lida>, e sobe 1
     createdAt: p.datetime(),
     updatedAt: p.datetime(),
   },
@@ -28,7 +30,7 @@ export const WagerTransactionRecord = defineEntity({
     externalTransactionId: p.string().length(128).nullable(),
     idempotencyKey: p.string().length(255),
     payloadHash: p.string().length(64),
-    walletId: p.uuid(),
+    walletId: () => p.manyToOne(WalletRecord).mapToPk().fieldName("wallet_id"),                // a wallet é inserida antes
     playerId: p.uuid(),
     roundId: p.string().length(128).nullable(),
     gameId: p.string().length(128).nullable(),
@@ -36,7 +38,7 @@ export const WagerTransactionRecord = defineEntity({
     amount: p.decimal().precision(18).scale(2),
     currency: p.string().length(3),
     referenceExternalTransactionId: p.string().length(128).nullable(),
-    referenceTransactionId: p.uuid().nullable(),
+    referenceTransactionId: () => p.manyToOne(WagerTransactionRecord).mapToPk().fieldName("reference_transaction_id").nullable(),
     status: p.string().length(24),
     failureCode: p.string().length(64).nullable(),
     balanceAfter: p.decimal().precision(18).scale(2).nullable(),
@@ -55,8 +57,8 @@ export const WalletLedgerEntryRecord = defineEntity({
   tableName: "wallet_ledger_entries",
   properties: {
     id: p.uuid().primary(),
-    walletId: p.uuid(),
-    transactionId: p.uuid(),
+    walletId: () => p.manyToOne(WalletRecord).mapToPk().fieldName("wallet_id"),
+    transactionId: () => p.manyToOne(WagerTransactionRecord).mapToPk().fieldName("transaction_id"),   // a transação é inserida antes
     direction: p.string().length(6),
     amount: p.decimal().precision(18).scale(2),
     currency: p.string().length(3),

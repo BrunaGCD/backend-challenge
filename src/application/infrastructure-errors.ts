@@ -3,6 +3,7 @@
 // ====================================================================================================
 // Transitório: vale tentar de novo (503 no HTTP, retry na fila, próxima varredura no worker).
 // O resto é inesperado: 500 no HTTP, retry na fila (nada foi gravado), FAILED no worker.
+import { ConcurrentUpdateError } from "./errors";                                               // conflito que aparece no flush
 
 const TRANSIENT_SQLSTATES = new Set([
   "40001",                                                                                      // serialization_failure
@@ -24,7 +25,7 @@ const TRANSIENT_MESSAGES = [
   "connect ECONNREFUSED",
 ];
 
-export type ConcurrencyConflictType = "lock_timeout" | "deadlock" | "unique_violation" | undefined;
+export type ConcurrencyConflictType = "lock_timeout" | "deadlock" | "unique_violation" | "optimistic_lock" | undefined;
 
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
@@ -44,6 +45,7 @@ export function concurrencyConflictType(error: unknown): ConcurrencyConflictType
   if (code === "55P03" || code === "57014") return "lock_timeout";
   if (code === "40P01" || code === "40001") return "deadlock";
   if (code === "23505") return "unique_violation";
+  if (error instanceof ConcurrentUpdateError) return "optimistic_lock";                         // version ou status mudou entre a leitura e o flush
   return undefined;
 }
 

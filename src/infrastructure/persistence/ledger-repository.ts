@@ -1,7 +1,8 @@
 // ====================================================================================================
 //                                    REPOSITÓRIO DO LEDGER
 // ====================================================================================================
-// Só INSERT e leitura: o ledger não tem update nem delete, nem aqui nem no banco (trigger).
+// Só INSERT (pelo Unit of Work, no flush do commit) e leitura: o ledger não tem update nem delete,
+// nem aqui nem no banco (trigger). A reconciliação é SQL escrito à mão, de propósito (abaixo).
 import type { InferEntity } from "@mikro-orm/postgresql";                                    // tipo da linha a partir do registro
 import type { LedgerRepository, ReconciliationRow } from "../../application/ports";
 import { Money } from "../../domain/money";
@@ -26,7 +27,8 @@ function toDomain(row: LedgerRow): WalletLedgerEntry {
 }
 
 // Uma consulta só: um comando enxerga um snapshot só, então saldo e soma do ledger são coerentes
-// mesmo com transações sendo aplicadas ao mesmo tempo, sem travar a wallet.
+// mesmo com transações sendo aplicadas ao mesmo tempo, sem travar a wallet. Em SQL direto porque
+// pelo ORM seriam duas consultas (a wallet e a soma), cada uma com o seu snapshot em READ COMMITTED.
 const RECONCILIATION_SQL = `
   select w.balance::text as stored_balance,
          w.currency as currency,
@@ -42,7 +44,8 @@ export class MikroOrmLedgerRepository implements LedgerRepository {
   constructor(private readonly database: MikroOrmDatabase) {}
 
   async insert(entry: WalletLedgerEntry): Promise<void> {
-    await this.database.entityManager().insert(WalletLedgerEntryRecord, {
+    const entityManager = this.database.transactionEntityManager();
+    const row = entityManager.create(WalletLedgerEntryRecord, {
       id: entry.id,
       walletId: entry.walletId,
       transactionId: entry.transactionId,
@@ -54,6 +57,7 @@ export class MikroOrmLedgerRepository implements LedgerRepository {
       walletVersion: entry.walletVersion,
       createdAt: entry.createdAt,
     });
+    entityManager.persist(row);                                                                 // depois da transação no flush: a relação define a ordem
   }
 
   async listByWallet(walletId: string, afterWalletVersion: number, limit: number): Promise<WalletLedgerEntry[]> {

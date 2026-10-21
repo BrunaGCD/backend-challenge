@@ -117,7 +117,7 @@ export class ProcessWagerTransaction {
       pendingRetryPolicy: this.settings.pendingRetryPolicy, referenceTtlMilliseconds: this.settings.referenceTtlMilliseconds,
     });
 
-    await this.repositories.transactions.insert(transaction);                                   // antes do lançamento: o ledger tem FK para ela
+    await this.repositories.transactions.insert(transaction);                                   // no flush do commit, antes do lançamento (FK)
     await this.persistMovement(outcome, wallet, versionBeforeMovement);
     await this.repositories.outbox.insert(this.eventsFor(outcome, transaction, wallet, context));
     return { kind: "decided", transaction, idempotentReplay: false };

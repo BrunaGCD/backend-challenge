@@ -1,8 +1,9 @@
 // ====================================================================================================
 //      ATOMICIDADE ENTRE WALLET, LEDGER, INBOX E OUTBOX, E EVENTO PUBLICADO SÓ DEPOIS DO COMMIT
 // ====================================================================================================
-// A falha entra pela composição das portas: a outbox real é embrulhada por uma que lança erro (ou que
-// para antes do commit). Banco e fila continuam reais.
+// A falha entra pela composição das portas: a outbox real é embrulhada por uma que força o flush do
+// Unit of Work e lança erro (as linhas já foram escritas na transação, falta só o commit), ou que para
+// antes do commit. Banco e fila continuam reais.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Repositories } from "../../src/application/ports";
 import type { WagerCommand } from "../../src/application/wager-command";
@@ -16,7 +17,7 @@ let app: RunningApp;
 let publisherApp: RunningApp;
 const touchedWallets: string[] = [];
 
-const injection = { failOutbox: false, pauseBeforeCommit: false };
+const injection = { failAfterFlush: false, pauseBeforeCommit: false };
 let reachedOutbox: () => void = () => {};
 let releaseCommit: () => void = () => {};
 
@@ -26,8 +27,11 @@ function withInjectedOutbox(real: Repositories): Repositories {
     outbox: {
       ...real.outbox,
       insert: async (messages) => {
-        if (injection.failOutbox) throw new Error("falha injetada entre o lançamento e a outbox");
         await real.outbox.insert(messages);
+        if (injection.failAfterFlush) {
+          await app.application.database.transactionEntityManager().flush();                  // wallet, transação, lançamento e outbox já escritos no banco
+          throw new Error("falha injetada depois do flush e antes do commit");
+        }
         if (injection.pauseBeforeCommit) {
           reachedOutbox();
           await new Promise<void>((resolve) => { releaseCommit = resolve; });                   // segura a transação aberta, antes do commit
@@ -64,14 +68,14 @@ afterAll(async () => {
 });
 
 describe("atomicidade", () => {
-  test("HTTP: erro entre o lançamento e a outbox desfaz tudo (transação, saldo, version, ledger)", async () => {
+  test("HTTP: erro com tudo já escrito na transação (depois do flush) e antes do commit desfaz tudo (transação, saldo, version, ledger, outbox)", async () => {
     const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
     touchedWallets.push(walletId);
     const before = await snapshot(walletId);
 
-    injection.failOutbox = true;
+    injection.failAfterFlush = true;
     const response = await submitWager(app.baseUrl, { walletId, playerId, kind: "BET", amount: "40.00" });
-    injection.failOutbox = false;
+    injection.failAfterFlush = false;
 
     expect(response.status).toBe(500);
     expect(response.body.code).toBe("INTERNAL_ERROR");
@@ -89,9 +93,9 @@ describe("atomicidade", () => {
     const messageId = `msg-${Bun.randomUUIDv7()}`;
     const context = { channel: "sqs" as const, correlationId: messageId, causationId: messageId, inbox: { consumerName: "atomicity-test", messageId } };
 
-    injection.failOutbox = true;
+    injection.failAfterFlush = true;
     await expect(app.application.processWager.execute(command, `key-${messageId}`, context)).rejects.toThrow("falha injetada");
-    injection.failOutbox = false;
+    injection.failAfterFlush = false;
 
     expect(await snapshot(walletId)).toEqual(before);
     const [inbox] = await testSql()`select count(*)::int as total from inbox_messages where message_id = ${messageId}`;

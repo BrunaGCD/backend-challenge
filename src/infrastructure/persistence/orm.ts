@@ -1,13 +1,14 @@
 // ====================================================================================================
 //                                  CRIAÇÃO DO MIKRORM E MIGRATIONS
 // ====================================================================================================
-import { MikroORM } from "@mikro-orm/postgresql";                                              // ORM com driver do PostgreSQL
+import { FlushMode, MikroORM } from "@mikro-orm/postgresql";                                   // ORM com driver do PostgreSQL
 import { Migrator } from "@mikro-orm/migrations";                                              // migrations rodadas por código
 import { ALL_RECORDS } from "./records";                                                        // registros das tabelas
 import { CreateWallets } from "./migrations/001-create-wallets";
 import { CreateWagerTransactions } from "./migrations/002-create-wager-transactions";
 import { CreateWalletLedgerEntries } from "./migrations/003-create-wallet-ledger-entries";
 import { CreateInboxAndOutbox } from "./migrations/004-create-inbox-and-outbox";
+import { ProtectWalletsAndLedger } from "./migrations/005-protect-wallets-and-ledger";
 
 export interface OrmOptions {
   databaseUrl: string;
@@ -17,7 +18,7 @@ export interface OrmOptions {
   silentMigrations?: boolean;                                                                   // testes não precisam do log do Migrator
 }
 
-export const MIGRATIONS = [CreateWallets, CreateWagerTransactions, CreateWalletLedgerEntries, CreateInboxAndOutbox];   // em ordem
+export const MIGRATIONS = [CreateWallets, CreateWagerTransactions, CreateWalletLedgerEntries, CreateInboxAndOutbox, ProtectWalletsAndLedger];   // em ordem
 
 export async function createOrm(options: OrmOptions): Promise<MikroORM> {
   return MikroORM.init({
@@ -31,6 +32,7 @@ export async function createOrm(options: OrmOptions): Promise<MikroORM> {
       options: `-c idle_in_transaction_session_timeout=${options.idleInTransactionTimeoutMilliseconds}`,   // sessão travada no meio da transação não segura o lock
     },
     allowGlobalContext: false,                                                                  // repositório fora de contexto é erro, não uso do em global
+    flushMode: FlushMode.COMMIT,                                                                // o Unit of Work só escreve no commit, nunca antes de uma consulta
     debug: false,
   });
 }

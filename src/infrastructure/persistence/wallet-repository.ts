@@ -1,9 +1,12 @@
 // ====================================================================================================
 //                                   REPOSITÓRIO DE WALLETS
 // ====================================================================================================
+// Grava pelo Unit of Work: insert faz persist de um registro novo, e updateBalance muda o registro que
+// a transação carregou com o lock (vem do Identity Map). O SQL sai no flush do commit, e o UPDATE leva
+// WHERE version = <a lida>: é o optimistic lock do MikroORM (version: true) somado ao FOR UPDATE.
 import type { InferEntity } from "@mikro-orm/postgresql";                                    // tipo da linha a partir do registro
 import { LockMode } from "@mikro-orm/postgresql";                                              // FOR UPDATE
-import { WalletVersionConflictError } from "../../application/errors";                          // UPDATE com 0 linhas é bug
+import { ConcurrentUpdateError } from "../../application/errors";                               // versão diferente da que o domínio viu é bug
 import type { WalletRepository } from "../../application/ports";
 import { Money } from "../../domain/money";
 import { Wallet } from "../../domain/wallet";
@@ -35,7 +38,7 @@ export class MikroOrmWalletRepository implements WalletRepository {
 
   async findByIdForUpdate(walletId: string): Promise<Wallet | undefined> {
     const stopTimer = walletLockWaitSeconds.startTimer();
-    const row = await this.database.entityManager().findOne(WalletRecord, { id: walletId }, { lockMode: LockMode.PESSIMISTIC_WRITE });   // trava só esta wallet
+    const row = await this.database.entityManager().findOne(WalletRecord, { id: walletId }, { lockMode: LockMode.PESSIMISTIC_WRITE, refresh: true });   // trava só esta wallet e lê o valor atual do banco
     stopTimer();
     return row ? toDomain(row) : undefined;
   }
@@ -46,23 +49,23 @@ export class MikroOrmWalletRepository implements WalletRepository {
   }
 
   async insert(wallet: Wallet): Promise<void> {
-    await this.database.entityManager().insert(WalletRecord, {
+    const entityManager = this.database.transactionEntityManager();
+    const row = entityManager.create(WalletRecord, {
       id: wallet.id,
       playerId: wallet.playerId,
       currency: wallet.currency,
       balance: wallet.balance.toString(),
-      version: wallet.version,
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt,
-    });
+    });                                                                                         // sem version: o banco grava 1 (default) e o ORM lê de volta
+    entityManager.persist(row);
   }
 
   async updateBalance(wallet: Wallet, expectedVersion: number): Promise<void> {
-    const affectedRows = await this.database.entityManager().nativeUpdate(
-      WalletRecord,
-      { id: wallet.id, version: expectedVersion },                                              // guarda extra contra lost update
-      { balance: wallet.balance.toString(), version: wallet.version, updatedAt: wallet.updatedAt },
-    );
-    if (affectedRows !== 1) throw new WalletVersionConflictError(`UPDATE da wallet ${wallet.id} com version ${expectedVersion} afetou ${affectedRows} linhas`);
+    const row = this.database.loadedRecord(WalletRecord, wallet.id);                            // o mesmo registro do FOR UPDATE, sem SQL
+    if (row.version !== expectedVersion) throw new ConcurrentUpdateError(`a wallet ${wallet.id} foi lida na versão ${row.version}, o domínio esperava ${expectedVersion}`);
+    if (wallet.version !== expectedVersion + 1) throw new ConcurrentUpdateError(`a wallet ${wallet.id} precisa subir uma versão por movimento, veio ${wallet.version}`);
+    row.balance = wallet.balance.toString();                                                    // só saldo e updatedAt mudam: a version o ORM sobe sozinho
+    row.updatedAt = wallet.updatedAt;
   }
 }
