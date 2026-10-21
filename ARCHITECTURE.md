@@ -286,7 +286,7 @@ O destino é `wagering-events.fifo`, com `MessageGroupId = aggregateId` (`wallet
 
 Com lock pessimista, conflito de lock é espera, não exceção, por isso a métrica principal é o tempo de espera (medido em volta do `SELECT ... FOR UPDATE`, então inclui também o tempo da própria consulta).
 
-**Health:** `GET /health/live` responde 200 sem olhar dependências (se olhasse o banco, uma queda dele reiniciaria todas as instâncias à toa); `GET /health/ready` faz `SELECT 1` e `GetQueueAttributes` na fila de entrada, e responde 503 se algum falhar ou se a instância estiver desligando. Os dois e o `/metrics` são públicos.
+**Health:** `GET /health/live` responde 200 sem olhar dependências (se olhasse o banco, uma queda dele reiniciaria todas as instâncias à toa); `GET /health/ready` chama a `checkReadiness()` montada na [composição](src/composition.ts), que faz um `select 1 from <as 5 tabelas> limit 0` (conecta e confere que as tabelas existem, sem ler nenhuma linha) e um `GetQueueAttributes` na fila de entrada, e responde 503 se algum falhar ou se a instância estiver desligando. O banco aparece como `unavailable` quando não responde e como `schema_missing` quando responde mas as tabelas não existem: um `SELECT 1` sozinho deixaria uma instância sem schema aparecer como pronta e responder 500 em toda rota. Os dois e o `/metrics` são públicos.
 
 ---
 

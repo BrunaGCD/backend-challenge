@@ -16,7 +16,7 @@ import type { RetryPolicy } from "./domain/backoff";
 import { BackgroundLoop } from "./infrastructure/background-loop";
 import { approximateNumberOfMessages, createSqsClient, QueueUrls, SqsEventPublisher, SqsInputQueue, type InputQueue } from "./infrastructure/messaging/sqs";
 import { SqsConsumer } from "./infrastructure/messaging/sqs-consumer";
-import { MikroOrmDatabase } from "./infrastructure/persistence/database";
+import { MikroOrmDatabase, type SchemaStatus } from "./infrastructure/persistence/database";
 import { MikroOrmInboxRepository, MikroOrmOutboxRepository } from "./infrastructure/persistence/inbox-outbox-repositories";
 import { MikroOrmLedgerRepository } from "./infrastructure/persistence/ledger-repository";
 import { createOrm } from "./infrastructure/persistence/orm";
@@ -49,7 +49,13 @@ export interface Application {
   backgroundLoops: BackgroundLoop[];
   ids: IdGenerator;
   shutdownState: { shuttingDown: boolean };
+  checkReadiness: () => Promise<Readiness>;
 }
+
+// readiness: desligando responde 503 sem olhar nada; senão, banco (com as tabelas) e fila de entrada
+export type Readiness =
+  | { shuttingDown: true }
+  | { shuttingDown: false; ready: boolean; checks: { postgres: SchemaStatus; sqs: "ok" | "unavailable" } };
 
 function retryPolicy(baseMilliseconds: number, capMilliseconds: number, random: RandomSource): RetryPolicy {
   return { baseMilliseconds, capMilliseconds, random: () => random.next() };
@@ -140,7 +146,23 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     return "wait";
   }));
 
-  return { config, orm, database, sqsClient, queueUrls, repositories, processWager, createWallet, queries, outboxPublisher, consumer, backgroundLoops, ids, shutdownState: { shuttingDown: false } };
+  // ----------------------------------------------------------------------------------------------------
+  //                                          READINESS
+  // ----------------------------------------------------------------------------------------------------
+  const shutdownState = { shuttingDown: false };
+  async function checkReadiness(): Promise<Readiness> {
+    if (shutdownState.shuttingDown) return { shuttingDown: true };
+    const postgres = await database.schemaStatus();                                             // conexão e as 5 tabelas
+    let sqs: "ok" | "unavailable" = "ok";
+    try {
+      await approximateNumberOfMessages(sqsClient, queueUrls, config.sqs.inputQueueName);      // GetQueueAttributes na fila de entrada
+    } catch {
+      sqs = "unavailable";
+    }
+    return { shuttingDown: false, ready: postgres === "ok" && sqs === "ok", checks: { postgres, sqs } };
+  }
+
+  return { config, orm, database, sqsClient, queueUrls, repositories, processWager, createWallet, queries, outboxPublisher, consumer, backgroundLoops, ids, shutdownState, checkReadiness };
 }
 
 export function startBackgroundWork(application: Application): void {

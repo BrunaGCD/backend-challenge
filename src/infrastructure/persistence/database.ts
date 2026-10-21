@@ -7,6 +7,10 @@ import { TransactionContext, type MikroORM, type SqlEntityManager } from "@mikro
 import type { TransactionRunner } from "../../application/ports";                               // porta que a aplicação usa
 
 const POSTGRES_INTERVAL_PATTERN = /^[0-9]+(ms|s|min)?$/;                                        // '2s', '5000ms': nada que dê para injetar SQL
+const SCHEMA_CHECK_SQL = "select 1 from wallets, wager_transactions, wallet_ledger_entries, inbox_messages, outbox_messages limit 0";   // confere as 5 tabelas sem ler nenhuma linha
+const UNDEFINED_TABLE = "42P01";                                                                // SQLSTATE de tabela que não existe
+
+export type SchemaStatus = "ok" | "unavailable" | "schema_missing";
 
 export interface TransactionTimeouts {
   lockTimeout: string;
@@ -40,8 +44,15 @@ export class MikroOrmDatabase implements TransactionRunner {
     return TransactionContext.getEntityManager(this.orm.em.name) !== undefined;
   }
 
-  async ping(): Promise<void> {
-    await this.orm.em.fork().execute("select 1");
+  // banco de pé mas sem as tabelas (migrations não rodaram) não está pronto para atender
+  async schemaStatus(): Promise<SchemaStatus> {
+    try {
+      await this.orm.em.fork().execute(SCHEMA_CHECK_SQL);
+      return "ok";
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      return code === UNDEFINED_TABLE ? "schema_missing" : "unavailable";
+    }
   }
 
   async close(): Promise<void> {

@@ -8,7 +8,6 @@ import { IdempotencyKeyMissingError, ValidationError, type FieldError } from "..
 import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, readMoney, readUuid, rejectUnknownFields } from "../../application/wager-command";
 import type { Application } from "../../composition";
 import { metricsRegistry } from "../../observability/metrics";
-import { approximateNumberOfMessages } from "../messaging/sqs";
 import { PublicRoute } from "./auth";
 import { presentLedgerEntry, presentReconciliation, presentTransaction, presentTransactionResult, presentWallet, statusCodeForTransaction } from "./presenters";
 import { sendProblem } from "./problem-details";
@@ -113,23 +112,12 @@ export class HealthController {
   @PublicRoute()
   @Get("health/ready")
   async ready(@Res() response: Response) {
-    if (this.application.shutdownState.shuttingDown) {
+    const readiness = await this.application.checkReadiness();
+    if (readiness.shuttingDown) {
       sendProblem(response, 503, "SERVICE_UNAVAILABLE", "instância desligando");
       return;
     }
-    const checks = { postgres: "ok", sqs: "ok" };
-    try {
-      await this.application.database.ping();                                                   // SELECT 1
-    } catch {
-      checks.postgres = "unavailable";
-    }
-    try {
-      await approximateNumberOfMessages(this.application.sqsClient, this.application.queueUrls, this.application.config.sqs.inputQueueName);   // GetQueueAttributes
-    } catch {
-      checks.sqs = "unavailable";
-    }
-    const ready = checks.postgres === "ok" && checks.sqs === "ok";
-    response.status(ready ? 200 : 503).json({ status: ready ? "ok" : "unavailable", checks });
+    response.status(readiness.ready ? 200 : 503).json({ status: readiness.ready ? "ok" : "unavailable", checks: readiness.checks });
   }
 
   @PublicRoute()

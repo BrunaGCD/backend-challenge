@@ -4,8 +4,10 @@
 // A aplicação fala com o banco e com a fila reais através de um proxy TCP que o teste corta e religa.
 //   SQS fora: o HTTP continua processando, os eventos esperam na outbox e saem quando ele volta.
 //   PostgreSQL fora: 503 com Retry-After e nada gravado; quando ele volta, o reenvio com a mesma key processa uma vez.
+//   PostgreSQL sem as tabelas: a readiness acusa, em vez de deixar a instância "healthy" respondendo 500.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createTestQueues, createWallet, drainQueue, httpRequest, startInProcessApp, submitWager, testConfig, testSql, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
+import { SQL } from "bun";                                                                      // cliente PostgreSQL do Bun, só para criar o banco vazio
+import { createTestQueues, createWallet, drainQueue, httpRequest, startInProcessApp, submitWager, testConfig, testSql, uniqueSuffix, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";
 import { TcpProxy } from "../support/tcp-proxy";
 
@@ -97,5 +99,22 @@ describe("PostgreSQL fora do ar", () => {
     expect(processed.body).toMatchObject({ status: "PROCESSED", balance: { amount: "70.00", currency: "BRL" }, idempotentReplay: false });   // o 503 não tinha gravado nada
     const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id = ${bet.externalTransactionId}`;
     expect(counts.total).toBe(1);
+  });
+});
+
+describe("PostgreSQL de pé, mas sem as tabelas", () => {
+  test("a readiness responde 503 com schema_missing, em vez de dizer que está pronta", async () => {
+    const emptyDatabaseUrl = new URL(process.env.DATABASE_URL!);
+    const databaseName = `wagering_empty_${uniqueSuffix()}`;
+    const admin = new SQL(emptyDatabaseUrl.toString());
+    await admin.unsafe(`create database ${databaseName}`);                                      // banco novo, sem migrations
+    await admin.close();
+    emptyDatabaseUrl.pathname = `/${databaseName}`;
+
+    const withoutSchema = await startInProcessApp(testConfig(queues, { DATABASE_URL: emptyDatabaseUrl.toString() }), {}, { background: false });
+    const ready = await httpRequest(withoutSchema.baseUrl, "GET", "/health/ready");
+    await withoutSchema.stop();
+    expect(ready.status).toBe(503);
+    expect(ready.body.checks).toEqual({ postgres: "schema_missing", sqs: "ok" });
   });
 });

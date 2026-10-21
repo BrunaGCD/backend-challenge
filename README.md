@@ -25,9 +25,13 @@ Isso sobe o PostgreSQL, o MiniStack, roda as migrations (serviço `migrate`), cr
 | `app-2` | http://localhost:3002 |
 | `app-3` | http://localhost:3003 |
 
-Para ver se estão prontas: `docker compose ps` (as três aparecem `healthy`) ou `curl localhost:3001/health/ready`.
+Para ver se estão prontas: `docker compose ps` (as três aparecem `healthy`) ou `curl localhost:3001/health/ready`. A readiness confere a conexão com o banco, as tabelas e a fila de entrada, então uma instância apontando para um banco sem as migrations aparece como não pronta.
 
-Para derrubar: `docker compose down`. O banco não tem volume nomeado, então cada `up` depois de um `down` começa vazio.
+Para derrubar: `docker compose down`. Os dados do banco ficam no volume `postgres-data`, então sobrevivem a um `down` e a uma recriação do container. Para começar do zero, apagando o volume:
+
+```sh
+docker compose down -v
+```
 
 ### Migrations
 
@@ -82,10 +86,10 @@ Os testes de integração e de concorrência usam o PostgreSQL e o MiniStack de 
 
 ```sh
 docker compose up -d --build
-docker compose run --rm tests
+docker compose run --rm --no-deps tests
 ```
 
-O serviço `tests` usa a mesma imagem da aplicação e roda `bun run test` em Linux.
+O serviço `tests` usa a mesma imagem da aplicação e roda `bun run test` em Linux, contra o PostgreSQL e o MiniStack que o `up` já subiu. O `--no-deps` faz o Compose usar esses containers como estão, sem recriar nenhum: sem ele, de vez em quando o Compose recriava o PostgreSQL antes de rodar os testes. A imagem é construída a partir do código, então depois de mudar alguma coisa é preciso o `--build` de novo.
 
 ### Na máquina, com o Bun
 

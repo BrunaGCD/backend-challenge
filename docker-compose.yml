@@ -1,5 +1,6 @@
 # docker compose up: PostgreSQL, MiniStack (SQS), migrations, criação das filas e 3 instâncias da
-# aplicação (portas 3001, 3002 e 3003). docker compose run --rm tests: a suíte inteira em Linux.
+# aplicação (portas 3001, 3002 e 3003). docker compose run --rm --no-deps tests: a suíte inteira em
+# Linux, usando o PostgreSQL e o MiniStack que já estão de pé. docker compose down -v: começa do zero.
 # As credenciais abaixo são fictícias, só para os containers locais.
 
 x-app-environment: &app-environment
@@ -33,6 +34,8 @@ services:
       POSTGRES_USER: wagering
       POSTGRES_PASSWORD: wagering
       POSTGRES_DB: wagering
+    volumes:
+      - postgres-data:/var/lib/postgresql/data   # se o container for recriado, os dados continuam
     ports:
       - "5432:5432"
     healthcheck:
@@ -108,3 +111,6 @@ services:
         condition: service_healthy
       ministack:
         condition: service_healthy
+
+volumes:
+  postgres-data:                               # apagado só com docker compose down -v
