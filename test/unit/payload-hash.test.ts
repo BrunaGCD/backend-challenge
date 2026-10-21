@@ -8,6 +8,10 @@ import canonicalize from "canonicalize";
 import { canonicalPayload, computeOpeningPayloadHash, computePayloadHash } from "../../src/application/payload-hash";
 import { parseWagerCommand, type WagerCommand } from "../../src/application/wager-command";
 import { Money } from "../../src/domain/money";
+import { IdempotencyKeyConflictError } from "../../src/application/errors";
+import type { Repositories } from "../../src/application/ports";
+import { ProcessWagerTransaction } from "../../src/application/process-wager-transaction";
+import { WagerTransaction } from "../../src/domain/wager-transaction";
 
 const SPEC_EXAMPLE = {
   providerId: "provider-a",
@@ -75,5 +79,30 @@ describe("o que entra e o que não entra no hash", () => {
       { ...SPEC_EXAMPLE, kind: "WIN", referenceExternalTransactionId: "bet-1" },
     ];
     for (const variation of variations) expect(computePayloadHash(command(variation))).not.toBe(original);
+  });
+});
+
+describe("idempotency key com payload divergente no caso de uso: conflito, não replay", () => {
+  // portas falsas só aqui, em teste de unidade: a transação já gravada com a key, e um runner que
+  // acusa se o caso de uso tentar abrir transação (replay e conflito se resolvem antes do lock)
+  const IDEMPOTENCY_KEY = "provider-a:transaction-123";
+  const original = command(SPEC_EXAMPLE);
+  const stored = WagerTransaction.create({ ...original, id: "tx-1", idempotencyKey: IDEMPOTENCY_KEY, payloadHash: computePayloadHash(original), correlationId: "corr-1", createdAt: new Date("2026-07-29T15:00:00.000Z") });
+  stored.markProcessed(undefined, Money.from({ amount: "975.00", currency: "BRL" }), new Date("2026-07-29T15:00:00.000Z"));
+
+  const repositories = { transactions: { findByIdempotencyKey: async (key: string) => (key === IDEMPOTENCY_KEY ? stored : undefined) } } as unknown as Repositories;
+  const runnerThatMustNotRun = { run: async () => { throw new Error("o caso de uso não devia abrir transação"); } };
+  const useCase = new ProcessWagerTransaction(runnerThatMustNotRun, repositories, { now: () => new Date() }, { newId: () => "id" }, { pendingRetryPolicy: { baseMilliseconds: 1, capMilliseconds: 1, random: () => 0 }, referenceTtlMilliseconds: 1 });
+  const context = { channel: "http" as const, correlationId: "corr-2", causationId: IDEMPOTENCY_KEY };
+
+  test("mesma key e mesmo payload: replay, com a transação original e o saldo da época", async () => {
+    const result = await useCase.execute(command(SPEC_EXAMPLE), IDEMPOTENCY_KEY, context);
+    expect(result).toEqual({ kind: "decided", transaction: stored, idempotentReplay: true });
+    if (result.kind === "decided") expect(result.transaction.balanceAfter?.toString()).toBe("975.00");
+  });
+
+  test("mesma key e payload diferente: IdempotencyKeyConflictError, nunca o resultado da original", async () => {
+    const divergent = command({ ...SPEC_EXAMPLE, money: { amount: "25.01", currency: "BRL" } });
+    await expect(useCase.execute(divergent, IDEMPOTENCY_KEY, context)).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
   });
 });

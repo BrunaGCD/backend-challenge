@@ -37,7 +37,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data   # se o container for recriado, os dados continuam
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"             # outra porta no computador: POSTGRES_PORT=55432 docker compose up -d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U wagering -d wagering"]   # por TCP: no primeiro init o servidor temporário só escuta no socket
       interval: 2s
@@ -47,7 +47,7 @@ services:
   ministack:
     image: ministackorg/ministack:1.5.30
     ports:
-      - "4566:4566"
+      - "${SQS_PORT:-4566}:4566"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health', timeout=2)"]   # o mesmo endpoint do healthcheck da imagem, com intervalo menor
       interval: 2s
@@ -80,7 +80,7 @@ services:
       <<: *app-environment
       INSTANCE_NAME: app-1
     ports:
-      - "3001:3000"
+      - "${APP_1_PORT:-3001}:3000"
 
   app-2:
     <<: *app
@@ -88,7 +88,7 @@ services:
       <<: *app-environment
       INSTANCE_NAME: app-2
     ports:
-      - "3002:3000"
+      - "${APP_2_PORT:-3002}:3000"
 
   app-3:
     <<: *app
@@ -96,7 +96,7 @@ services:
       <<: *app-environment
       INSTANCE_NAME: app-3
     ports:
-      - "3003:3000"
+      - "${APP_3_PORT:-3003}:3000"
 
   tests:
     image: wagering-processor:local

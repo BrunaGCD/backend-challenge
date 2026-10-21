@@ -1,7 +1,7 @@
 // ====================================================================================================
 //                              CONFIGURAÇÃO LIDA DAS VARIÁVEIS DE AMBIENTE
 // ====================================================================================================
-// Todo número marcado como [ajustável] na especificação mora aqui, com o valor inicial como padrão.
+// Todo número ajustável mora aqui, com o valor inicial como padrão.
 
 export interface AppConfig {
   port: number;

@@ -23,4 +23,4 @@ export const outboxPublishDelaySeconds = new Histogram({ name: "wagering_outbox_
 export const processingDurationSeconds = new Histogram({ name: "wagering_processing_duration_seconds", help: "Duração do processamento de uma transação, por canal e resultado", labelNames: ["channel", "outcome"], buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5], registers });
 export const reconciliationDivergencesTotal = new Counter({ name: "wagering_reconciliation_divergences_total", help: "Reconciliações que encontraram saldo diferente do ledger", registers });
 export const pendingReferenceGauge = new Gauge({ name: "wagering_pending_reference", help: "Transações em PENDING_REFERENCE", registers });
-export const inboxPayloadConflictsTotal = new Counter({ name: "inbox_payload_conflicts_total", help: "Mesmo messageId com conteúdo diferente", registers });
+export const inboxPayloadConflictsTotal = new Counter({ name: "wagering_inbox_payload_conflicts_total", help: "Mesmo messageId com conteúdo diferente", registers });

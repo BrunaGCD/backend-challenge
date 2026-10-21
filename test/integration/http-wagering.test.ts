@@ -145,6 +145,8 @@ describe("POST /wagering/transactions: validação da entrada (400, nada gravado
     ["kind OPENING", (body) => { body.kind = "OPENING"; }, "kind"],
     ["BET com valor zero", (body) => { body.money.amount = "0.00"; }, "money.amount"],
     ["BET com referência", (body) => { body.referenceExternalTransactionId = "bet-x"; }, "referenceExternalTransactionId"],
+    ["ROLLBACK que referencia a si mesmo", (body) => { body.kind = "ROLLBACK"; body.referenceExternalTransactionId = body.externalTransactionId; }, "referenceExternalTransactionId"],
+    ["WIN que referencia a si mesmo", (body) => { body.kind = "WIN"; body.referenceExternalTransactionId = body.externalTransactionId; }, "referenceExternalTransactionId"],
     ["campo desconhecido", (body) => { body.referenceExternalTransactionID = "typo"; }, "referenceExternalTransactionID"],
     ["providerId reservado", (body) => { body.providerId = "internal"; }, "providerId"],
     ["providerId com caractere fora do padrão", (body) => { body.providerId = "provider a"; }, "providerId"],

@@ -29,8 +29,10 @@ afterAll(async () => {
   await Promise.all(instances.map((instance) => stopInstance(instance)));
 });
 
-function amountText(cents: number): string {
-  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+// valor sorteado em centavos, de minimumCents até minimumCents + spread; o dinheiro é bigint desde o sorteio
+function randomAmountText(random: () => number, minimumCents: bigint, spread: number): string {
+  const cents = minimumCents + BigInt(Math.floor(random() * spread));                          // só a posição sorteada é number, o valor não
+  return `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
 }
 
 test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet só: cada operação única vira exatamente uma transação, nenhuma vai para a DLQ, e saldo, ledger e reconciliação batem", async () => {
@@ -45,10 +47,10 @@ test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet s�
     const draw = random();
     let operation: WagerInput;
     if (draw < 0.45 || reversibleBets.length === 0) {
-      operation = { walletId, playerId, kind: "BET", amount: amountText(100 + Math.floor(random() * 2000)), externalTransactionId: `hot-bet-${index}`, roundId: `round-${index}` };
+      operation = { walletId, playerId, kind: "BET", amount: randomAmountText(random, 100n, 2000), externalTransactionId: `hot-bet-${index}`, roundId: `round-${index}` };
       reversibleBets.push(operation);
     } else if (draw < 0.7) {
-      operation = { walletId, playerId, kind: "WIN", amount: amountText(50 + Math.floor(random() * 1500)), externalTransactionId: `hot-win-${index}`, roundId: `round-${index}` };
+      operation = { walletId, playerId, kind: "WIN", amount: randomAmountText(random, 50n, 1500), externalTransactionId: `hot-win-${index}`, roundId: `round-${index}` };
       reversibleWins.push(operation);
     } else if (draw < 0.8) {
       const bet = reversibleBets[Math.floor(random() * reversibleBets.length)]!;

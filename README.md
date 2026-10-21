@@ -25,6 +25,8 @@ Isso sobe o PostgreSQL, o MiniStack, roda as migrations (serviço `migrate`), cr
 | `app-2` | http://localhost:3002 |
 | `app-3` | http://localhost:3003 |
 
+As portas do computador podem ser trocadas se alguma já estiver ocupada (um PostgreSQL local, por exemplo): `POSTGRES_PORT`, `SQS_PORT`, `APP_1_PORT`, `APP_2_PORT` e `APP_3_PORT`, como em `POSTGRES_PORT=55432 docker compose up -d --build`. Dentro do Docker nada muda; só quem roda fora dele (o caminho "Na máquina, com o Bun", abaixo) precisa apontar `DATABASE_URL` ou `SQS_ENDPOINT` para a porta nova.
+
 Para ver se estão prontas: `docker compose ps` (as três aparecem `healthy`) ou `curl localhost:3001/health/ready`. A readiness confere a conexão com o banco, as tabelas e a fila de entrada, então uma instância apontando para um banco sem as migrations aparece como não pronta.
 
 Para derrubar: `docker compose down`. Os dados do banco ficam no volume `postgres-data`, então sobrevivem a um `down` e a uma recriação do container. Para começar do zero, apagando o volume:
@@ -76,7 +78,14 @@ Os outros endpoints:
 | `GET /health/live` e `GET /health/ready` | liveness e readiness (banco e fila) |
 | `GET /metrics` | métricas no formato do Prometheus |
 
-Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo (o formato da mensagem está no ARCHITECTURE.md). Os eventos publicados saem em `wagering-events.fifo`.
+Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo (o formato da mensagem está no ARCHITECTURE.md). Os eventos publicados saem em `wagering-events.fifo`. Para mandar uma operação pela fila sem escrever código, há um script que monta a mensagem nesse formato e roda pelo container de testes (que já tem o endereço do MiniStack):
+
+```sh
+docker compose run --rm --no-deps tests bun scripts/send-wager-message.ts \
+  --wallet <walletId> --player 0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1 --kind BET --amount 25.00
+```
+
+Ele imprime a mensagem enviada e o caminho para consultar o resultado (`GET /providers/provider-a/wagering/transactions/<externalTransactionId>`). Com `--reference <id externo>` manda um `REFUND`/`ROLLBACK`, repetir `--external-id` testa o replay, e repetir `--message-id` testa a inbox. Com o Bun na máquina, `bun run queue:send -- --wallet ...` faz o mesmo.
 
 ## Rodar os testes
 
@@ -105,11 +114,11 @@ bun run test                 # os três em sequência
 
 No Windows, o teste de desligamento gracioso (`SIGTERM`) é pulado, porque o Windows não entrega `SIGTERM` para o processo (o resultado do experimento E1 está no ARCHITECTURE.md). No Docker ele roda.
 
-Também há `bun run typecheck` (TypeScript estrito) e `bun run lint` (inclusive a regra que impede o domínio de importar NestJS ou MikroORM).
+Também há `bun run typecheck` (TypeScript estrito) e `bun run lint` (inclusive a regra que impede o domínio e a aplicação de importar NestJS, MikroORM ou a infraestrutura).
 
 ## Configuração
 
-Todos os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, com o valor inicial da especificação como padrão. A lista está em [.env.example](.env.example); o Bun lê um `.env` automaticamente se você copiar o exemplo. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
+Todos os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, com um valor inicial escolhido como padrão. A lista está em [.env.example](.env.example); o Bun lê um `.env` automaticamente se você copiar o exemplo. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
 
 ## Estrutura
 

@@ -101,7 +101,7 @@ describe("inbox e redelivery", () => {
     const original = wagerMessage(messageId, { walletId, playerId, kind: "BET", amount: "10.00" });
     await sendWagerMessage(queues.inputQueueName, original);
     await waitUntil("original processada", () => transactionByExternalId(original.data.externalTransactionId as string));
-    const conflictsBefore = await metricValue("inbox_payload_conflicts_total");
+    const conflictsBefore = await metricValue("wagering_inbox_payload_conflicts_total");
 
     const reusedId = wagerMessage(messageId, { walletId, playerId, kind: "BET", amount: "20.00" });   // produtor reutilizou o messageId
     await sendWagerMessage(queues.inputQueueName, reusedId, { deduplicationId: `${messageId}-reused` });
@@ -111,7 +111,7 @@ describe("inbox e redelivery", () => {
     });
     expect(deadLetters[0]!.attributes.reason).toBe("INBOX_PAYLOAD_CONFLICT");
     expect(JSON.parse(deadLetters[0]!.body).data.externalTransactionId).toBe(reusedId.data.externalTransactionId);
-    expect(await metricValue("inbox_payload_conflicts_total")).toBe(conflictsBefore + 1);
+    expect(await metricValue("wagering_inbox_payload_conflicts_total")).toBe(conflictsBefore + 1);
     expect(await transactionByExternalId(reusedId.data.externalTransactionId as string)).toBeUndefined();
   });
 

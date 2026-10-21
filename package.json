@@ -7,6 +7,7 @@
     "migrate:up": "bun scripts/migrate.ts up",
     "migrate:down": "bun scripts/migrate.ts down",
     "queues:create": "bun scripts/create-queues.ts",
+    "queue:send": "bun scripts/send-wager-message.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test scripts",
     "test:unit": "bun test test/unit",
