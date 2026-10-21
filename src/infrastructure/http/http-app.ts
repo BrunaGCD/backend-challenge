@@ -9,10 +9,11 @@ import { stopBackgroundWork, type Application } from "../../composition";
 import { runWithLogContext } from "../../observability/log-context";
 import { logger } from "../../observability/logger";
 import { AuthGuard, NoopProviderIdentity } from "./auth";
-import { APPLICATION, HealthController, WageringController, WalletsController } from "./controllers";
+import { ACCEPTED_CURRENCIES, CHECK_READINESS, CREATE_WALLET, HealthController, PROCESS_WAGER, WageringController, WALLET_QUERIES, WalletsController } from "./controllers";
 import { ProblemDetailsFilter, sendProblem } from "./problem-details";
 
 const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;                                      // até 128 caracteres seguros
+const APPLICATION = "APPLICATION";                                                              // só o ciclo de vida recebe a aplicação montada inteira
 
 // passos do SIGTERM (seção 10): readiness em 503, consumidor e laços param, HTTP fecha, pool fecha
 @Injectable()
@@ -59,7 +60,12 @@ export async function createHttpApp(application: Application): Promise<INestAppl
   @Module({
     controllers: [WalletsController, WageringController, HealthController],
     providers: [
-      { provide: APPLICATION, useValue: application },
+      { provide: CREATE_WALLET, useValue: application.createWallet },                          // cada controller recebe só o que usa
+      { provide: WALLET_QUERIES, useValue: application.queries },
+      { provide: PROCESS_WAGER, useValue: application.processWager },
+      { provide: ACCEPTED_CURRENCIES, useValue: application.config.acceptedCurrencies },
+      { provide: CHECK_READINESS, useValue: application.checkReadiness },
+      { provide: APPLICATION, useValue: application },                                         // para o ShutdownCoordinator parar os laços e fechar o pool
       { provide: APP_GUARD, useFactory: (reflector: Reflector) => new AuthGuard(reflector, new NoopProviderIdentity()), inject: [Reflector] },   // troca o no-op pelo adaptador do IdP aqui
       ShutdownCoordinator,
     ],
