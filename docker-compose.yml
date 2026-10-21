@@ -1,3 +1,31 @@
+# docker compose up: PostgreSQL, MiniStack (SQS), migrations, criação das filas e 3 instâncias da
+# aplicação (portas 3001, 3002 e 3003). docker compose run --rm tests: a suíte inteira em Linux.
+# As credenciais abaixo são fictícias, só para os containers locais.
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql://wagering:wagering@postgres:5432/wagering
+  SQS_ENDPOINT: http://ministack:4566
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  LOG_LEVEL: info
+
+x-app: &app
+  build: .
+  image: wagering-processor:local
+  init: true                                   # o sinal chega no Bun
+  stop_grace_period: 30s                       # maior que os 20 s internos para concluir mensagens
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    create-queues:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+    interval: 5s
+    timeout: 3s
+    retries: 12
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,3 +45,66 @@ services:
     image: ministackorg/ministack:1.5.30
     ports:
       - "4566:4566"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health', timeout=2)"]   # o mesmo endpoint do healthcheck da imagem, com intervalo menor
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: wagering-processor:local
+    build: .
+    command: ["bun", "scripts/migrate.ts", "up"]
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  create-queues:
+    image: wagering-processor:local
+    build: .
+    command: ["bun", "scripts/create-queues.ts"]
+    environment: *app-environment
+    depends_on:
+      ministack:
+        condition: service_healthy
+    restart: "no"
+
+  app-1:
+    <<: *app
+    environment:
+      <<: *app-environment
+      INSTANCE_NAME: app-1
+    ports:
+      - "3001:3000"
+
+  app-2:
+    <<: *app
+    environment:
+      <<: *app-environment
+      INSTANCE_NAME: app-2
+    ports:
+      - "3002:3000"
+
+  app-3:
+    <<: *app
+    environment:
+      <<: *app-environment
+      INSTANCE_NAME: app-3
+    ports:
+      - "3003:3000"
+
+  tests:
+    image: wagering-processor:local
+    build: .
+    profiles: ["test"]                         # não sobe no docker compose up
+    command: ["bun", "run", "test"]
+    environment:
+      DATABASE_URL: postgresql://wagering:wagering@postgres:5432/wagering
+      SQS_ENDPOINT: http://ministack:4566
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ministack:
+        condition: service_healthy

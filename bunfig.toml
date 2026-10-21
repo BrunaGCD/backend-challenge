@@ -1,0 +1,3 @@
+[install]
+# versões exatas do bun.lock; nada de resolver de novo na instalação
+exact = true
