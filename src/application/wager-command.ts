@@ -108,7 +108,6 @@ export function parseWagerCommand(body: unknown, acceptedCurrencies: string[]): 
   const referenceRequired = kind === WagerTransactionKind.Refund || kind === WagerTransactionKind.Rollback;
   if (referenceRequired && !hasReference) errors.push({ field: "referenceExternalTransactionId", message: `obrigatório em ${kind}` });
   if (kind === WagerTransactionKind.Bet && hasReference) errors.push({ field: "referenceExternalTransactionId", message: "BET não aceita referência" });
-  if (hasReference && referenceExternalTransactionId === externalTransactionId) errors.push({ field: "referenceExternalTransactionId", message: "não pode ser o próprio externalTransactionId" });   // nunca resolveria: 400 na hora em vez de 202 e rejeição depois
 
   if (money && money.isZero() && kind !== WagerTransactionKind.Loss && PROVIDER_KINDS.includes(kind)) {
     errors.push({ field: "money.amount", message: `${kind} exige valor maior que zero; rodada sem prêmio é LOSS` });

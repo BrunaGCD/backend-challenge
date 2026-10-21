@@ -145,8 +145,6 @@ describe("POST /wagering/transactions: validação da entrada (400, nada gravado
     ["kind OPENING", (body) => { body.kind = "OPENING"; }, "kind"],
     ["BET com valor zero", (body) => { body.money.amount = "0.00"; }, "money.amount"],
     ["BET com referência", (body) => { body.referenceExternalTransactionId = "bet-x"; }, "referenceExternalTransactionId"],
-    ["ROLLBACK que referencia a si mesmo", (body) => { body.kind = "ROLLBACK"; body.referenceExternalTransactionId = body.externalTransactionId; }, "referenceExternalTransactionId"],
-    ["WIN que referencia a si mesmo", (body) => { body.kind = "WIN"; body.referenceExternalTransactionId = body.externalTransactionId; }, "referenceExternalTransactionId"],
     ["campo desconhecido", (body) => { body.referenceExternalTransactionID = "typo"; }, "referenceExternalTransactionID"],
     ["providerId reservado", (body) => { body.providerId = "internal"; }, "providerId"],
     ["providerId com caractere fora do padrão", (body) => { body.providerId = "provider a"; }, "providerId"],
@@ -249,6 +247,24 @@ describe("POST /wagering/transactions: regras de negócio e status", () => {
     expect(rejected.failureCode).toBe("REFERENCE_NOT_FOUND");
     const [event] = await testSql()`select count(*)::int as total from outbox_messages where event_type = 'WagerTransactionRejected' and payload->'data'->>'transactionId' = ${rollback.body.transactionId}`;
     expect(event.total).toBe(1);
+  });
+
+  // apontar para si mesma é apontar para uma do próprio tipo, que a regra 3 nunca permite: rejeição de negócio, gravada
+  test.each(["ROLLBACK", "WIN"])("%s que referencia a si mesmo: 422 REFERENCE_KIND_NOT_ALLOWED, gravada, com evento, e o replay devolve a mesma rejeição", async (kind) => {
+    const { walletId, playerId } = await newWallet("100.00");
+    const externalTransactionId = `self-${Bun.randomUUIDv7()}`;
+    const itself = { walletId, playerId, kind, amount: "5.00", externalTransactionId, reference: externalTransactionId };
+    const rejected = await submitWager(app.baseUrl, itself);
+    expect(rejected.status).toBe(422);
+    expect(rejected.body).toMatchObject({ status: "REJECTED", failureCode: "REFERENCE_KIND_NOT_ALLOWED", balance: { amount: "100.00", currency: "BRL" }, idempotentReplay: false });
+    const [stored] = await testSql()`select status, failure_code from wager_transactions where id = ${rejected.body.transactionId}`;
+    expect(stored).toEqual({ status: "REJECTED", failure_code: "REFERENCE_KIND_NOT_ALLOWED" });
+    const events = await testSql()`select event_type from outbox_messages where payload->'data'->>'transactionId' = ${rejected.body.transactionId}`;
+    expect(events.map((event: any) => event.event_type)).toEqual(["WagerTransactionRejected"]);
+    expect(await countRows("wallet_ledger_entries", walletId)).toBe(1);                         // só a abertura
+    const replay = await submitWager(app.baseUrl, itself);
+    expect(replay.status).toBe(422);
+    expect(replay.body).toEqual({ ...rejected.body, idempotentReplay: true });
   });
 });
 

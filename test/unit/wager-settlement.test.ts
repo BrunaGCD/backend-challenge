@@ -116,6 +116,22 @@ describe("WIN", () => {
   });
 });
 
+describe("transação que referencia o próprio externalTransactionId", () => {
+  // apontaria para uma transação do próprio tipo, e a regra 3 nunca permite isso
+  test.each([Kind.Win, Kind.Loss, Kind.Refund, Kind.Rollback])("%s: REJECTED com REFERENCE_KIND_NOT_ALLOWED na hora, sem esperar a referência", (kind) => {
+    const world = scenario("100.00");
+    const externalTransactionId = nextId("ext");
+    const itself = newTransaction({ kind, amount: "10.00", externalTransactionId, reference: externalTransactionId });
+    const outcome = world.settle(itself);                                                       // a referência não existe: seria ela mesma
+    expect(outcome).toEqual({ outcome: "rejected", failureCode: FailureCode.ReferenceKindNotAllowed });
+    expect(itself.status).toBe(Status.Rejected);
+    expect(itself.balanceAfter?.toString()).toBe("100.00");                                     // saldo observado, sem movimento
+    expect(world.wallet.balance.toString()).toBe("100.00");
+    expect(world.entries).toHaveLength(1);                                                      // só a abertura
+    world.assertLedgerConsistent();
+  });
+});
+
 describe("LOSS", () => {
   test("processa sem mover saldo e sem lançamento, inclusive com valor zero", () => {
     const world = scenario("100.00");

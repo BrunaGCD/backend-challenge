@@ -52,6 +52,8 @@ export function settleWagerTransaction(input: SettlementInput): SettlementOutcom
   // Identidade, tipo e valor da referência nunca mudam, então uma referência errada é rejeitada na hora,
   // mesmo que ela ainda esteja pendente. Só o estado dela pode mudar com o tempo.
   if (transaction.referenceExternalTransactionId !== undefined) {
+    const referencesItself = transaction.referenceExternalTransactionId === transaction.externalTransactionId;   // seria uma do próprio tipo, que a regra 3 nunca permite
+    if (referencesItself) return reject(input, FailureCode.ReferenceKindNotAllowed);           // rejeita na hora, em vez de esperar uma referência que nunca chega
     if (!reference) return waitForReference(input);
 
     const sameOwner = reference.providerId === transaction.providerId && reference.playerId === transaction.playerId && reference.walletId === transaction.walletId;
