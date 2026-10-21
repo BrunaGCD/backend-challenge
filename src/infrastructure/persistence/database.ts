@@ -9,10 +9,12 @@
 import { OptimisticLockError, TransactionContext, type EntityName, type MikroORM, type Primary, type SqlEntityManager } from "@mikro-orm/postgresql";   // ORM e contexto da transação
 import { ConcurrentUpdateError } from "../../application/errors";                               // o conflito do flush, com o nome da aplicação
 import type { TransactionRunner } from "../../application/ports";                               // porta que a aplicação usa
+import { logger } from "../../observability/logger";                                            // aviso quando o pool não fecha
 
 const POSTGRES_INTERVAL_PATTERN = /^[0-9]+(ms|s|min)?$/;                                        // '2s', '5000ms': nada que dê para injetar SQL
 const SCHEMA_CHECK_SQL = "select 1 from wallets, wager_transactions, wallet_ledger_entries, inbox_messages, outbox_messages limit 0";   // confere as 5 tabelas sem ler nenhuma linha
 const UNDEFINED_TABLE = "42P01";                                                                // SQLSTATE de tabela que não existe
+const POOL_CLOSE_TIMEOUT_MILLISECONDS = 5_000;                                                  // dentro dos 30 s de stop_grace_period do compose
 
 export type SchemaStatus = "ok" | "unavailable" | "schema_missing";
 
@@ -78,7 +80,14 @@ export class MikroOrmDatabase implements TransactionRunner {
     }
   }
 
+  // Se o banco caiu no meio de uma transação, o rollback falha e o kysely (por baixo do MikroORM 7) não
+  // devolve aquela conexão ao pool: o release vem depois do await que lança. O pool.end() do pg espera
+  // as conexões emprestadas voltarem, então sem limite o desligamento ficaria preso nela para sempre.
   async close(): Promise<void> {
-    await this.orm.close();
+    const closed = this.orm.close().then(() => "closed" as const);
+    const timedOut = Bun.sleep(POOL_CLOSE_TIMEOUT_MILLISECONDS).then(() => "timed_out" as const);
+    if ((await Promise.race([closed, timedOut])) === "timed_out") {
+      logger.warn({ event: "database_close_timeout", waitedMilliseconds: POOL_CLOSE_TIMEOUT_MILLISECONDS }, "o pool não fechou a tempo: sobrou conexão emprestada de uma transação cortada pela rede; seguindo com o desligamento");
+    }
   }
 }

@@ -268,13 +268,13 @@ export async function drainQueue(queueName: string, quietMilliseconds = 1500): P
       await Bun.sleep(100);
       continue;
     }
-    quietSince = Date.now();
     for (const message of messages) {
       const attributes: Record<string, string | undefined> = {};
       for (const [name, value] of Object.entries(message.MessageAttributes ?? {})) attributes[name] = value.StringValue;
       received.push({ body: message.Body ?? "", attributes });
       await testSqsClient().send(new DeleteMessageCommand({ QueueUrl: url, ReceiptHandle: message.ReceiptHandle }));
     }
+    quietSince = Date.now();                                                                    // o silêncio conta do fim do lote: apagar 10 mensagens pode levar mais que o prazo
   }
   return received;
 }

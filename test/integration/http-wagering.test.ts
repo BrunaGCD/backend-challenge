@@ -292,7 +292,15 @@ describe("consultas", () => {
 
     const divergent = await newWallet("50.00");
     touchedWallets.pop();                                                                       // esta wallet é estragada de propósito
-    await testSql()`update wallets set balance = 45.00 where id = ${divergent.walletId}`;        // simula uma divergência por fora da aplicação
+    // simula uma divergência por fora da aplicação; o banco não deixaria (migration 005), então os dois
+    // triggers da wallet são desligados e religados dentro desta transação, então só este UPDATE escapa deles
+    await testSql().begin(async (transaction) => {
+      await transaction`alter table wallets disable trigger wallets_guard_row`;
+      await transaction`alter table wallets disable trigger wallets_matches_last_entry`;
+      await transaction`update wallets set balance = 45.00 where id = ${divergent.walletId}`;
+      await transaction`alter table wallets enable trigger wallets_guard_row`;
+      await transaction`alter table wallets enable trigger wallets_matches_last_entry`;
+    });
     const metricsBefore = await httpRequest(app.baseUrl, "GET", "/metrics");
     const reconciliation = await httpRequest(app.baseUrl, "POST", `/wallets/${divergent.walletId}/reconciliation`);
     expect(reconciliation.status).toBe(200);
