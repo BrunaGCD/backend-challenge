@@ -153,3 +153,22 @@ describe("WagerTransaction: consultas", () => {
     expect(newTransaction().money).toBeInstanceOf(Money);
   });
 });
+
+describe("forma da classe (esqueleto da seção 6.3)", () => {
+  test("identidade e negócio são readonly, e o estado da decisão só muda pelas transições", () => {
+    // nunca chamada: os @ts-expect-error fazem o typecheck falhar se alguma dessas atribuições passar a compilar
+    const changeFromOutside = (transaction: WagerTransaction) => {
+      // @ts-expect-error id é readonly
+      transaction.id = "outro-id";
+      // @ts-expect-error o valor é readonly
+      transaction.money = brl("1.00");
+      // @ts-expect-error status só tem getter: muda por markProcessed, reject, fail e markPendingReference
+      transaction.status = WagerTransactionStatus.Processed;
+    };
+    expect(typeof changeFromOutside).toBe("function");
+
+    const transaction = newTransaction();
+    transaction.reject(FailureCode.InsufficientFunds, brl("0.00"), later);
+    expect(transaction.toState()).toMatchObject({ status: WagerTransactionStatus.Rejected, failureCode: FailureCode.InsufficientFunds, updatedAt: later, createdAt: NOW });
+  });
+});

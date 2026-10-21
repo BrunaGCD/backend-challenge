@@ -2,7 +2,8 @@
 //                    WAGER TRANSACTION: UMA OPERAÇÃO DO PROVEDOR E O SEU ESTADO
 // ====================================================================================================
 // Nasce em PENDING (só em memória) e sai dele antes do commit. PROCESSED, REJECTED e FAILED são
-// terminais: tentar sair deles é erro de programação, não caminho de negócio.
+// terminais: tentar sair deles é erro de programação, não caminho de negócio. A forma segue o
+// esqueleto da seção 6.3: identidade e negócio readonly, e só o estado da decisão privado e mutável.
 import { fullJitterDelayMilliseconds, type RetryPolicy } from "./backoff";                     // reagendamento do worker
 import { InvalidTransactionStateError, InvalidWagerTransactionError } from "./errors";          // estado e criação inválidos
 import { FailureCode } from "./failure-code";                                                   // motivo de rejeição ou falha
@@ -81,7 +82,30 @@ export interface CreateOpeningTransactionProps {
 }
 
 export class WagerTransaction {
-  private constructor(private state: WagerTransactionState) {}
+  private constructor(
+    public readonly id: string,
+    public readonly providerId: string | undefined,
+    public readonly externalTransactionId: string | undefined,
+    public readonly idempotencyKey: string,
+    public readonly payloadHash: string,
+    public readonly walletId: string,
+    public readonly playerId: string,
+    public readonly roundId: string | undefined,
+    public readonly gameId: string | undefined,
+    public readonly kind: WagerTransactionKind,
+    public readonly money: Money,
+    public readonly referenceExternalTransactionId: string | undefined,                         // id no provedor, não o id interno
+    public readonly correlationId: string,
+    public readonly createdAt: Date,
+    private _status: WagerTransactionStatus,
+    private _referenceTransactionId: string | undefined,
+    private _failureCode: FailureCode | undefined,
+    private _processedAt: Date | undefined,
+    private _balanceAfter: Money | undefined,                                                   // saldo observado na decisão
+    private _attempts: number,                                                                  // tentativas do worker sem a referência
+    private _nextAttemptAt: Date | undefined,
+    private _updatedAt: Date,
+  ) {}
 
   // ----------------------------------------------------------------------------------------------------
   //                                         FACTORIES
@@ -95,79 +119,51 @@ export class WagerTransaction {
     if (props.money.isNegative()) throw new InvalidWagerTransactionError("valor não pode ser negativo");
     if (props.kind !== WagerTransactionKind.Loss && props.money.isZero()) throw new InvalidWagerTransactionError(`${props.kind} exige valor maior que zero`);
 
-    return new WagerTransaction({
-      ...props,
-      referenceTransactionId: undefined,
-      status: WagerTransactionStatus.Pending,
-      failureCode: undefined,
-      balanceAfter: undefined,
-      attempts: 0,
-      nextAttemptAt: undefined,
-      updatedAt: props.createdAt,
-      processedAt: undefined,
-    });
+    return new WagerTransaction(
+      props.id, props.providerId, props.externalTransactionId, props.idempotencyKey, props.payloadHash, props.walletId, props.playerId,
+      props.roundId, props.gameId, props.kind, props.money, props.referenceExternalTransactionId, props.correlationId, props.createdAt,
+      WagerTransactionStatus.Pending, undefined, undefined, undefined, undefined, 0, undefined, props.createdAt,   // nasce em PENDING, sem decisão
+    );
   }
 
   static createOpening(props: CreateOpeningTransactionProps): WagerTransaction {
     if (!props.money.isPositive()) throw new InvalidWagerTransactionError("OPENING só existe com saldo inicial maior que zero");
-    return new WagerTransaction({
-      id: props.id,
-      providerId: undefined,                                                                    // não vem de provedor (interpretação I8)
-      externalTransactionId: undefined,
-      idempotencyKey: `opening:${props.walletId}`,                                              // também impede dois OPENING na mesma wallet
-      payloadHash: props.payloadHash,
-      walletId: props.walletId,
-      playerId: props.playerId,
-      roundId: undefined,
-      gameId: undefined,
-      kind: WagerTransactionKind.Opening,
-      money: props.money,
-      referenceExternalTransactionId: undefined,
-      referenceTransactionId: undefined,
-      status: WagerTransactionStatus.Pending,
-      failureCode: undefined,
-      balanceAfter: undefined,
-      correlationId: props.correlationId,
-      attempts: 0,
-      nextAttemptAt: undefined,
-      createdAt: props.createdAt,
-      updatedAt: props.createdAt,
-      processedAt: undefined,
-    });
+    const idempotencyKey = `opening:${props.walletId}`;                                         // também impede dois OPENING na mesma wallet
+    return new WagerTransaction(
+      props.id, undefined, undefined, idempotencyKey, props.payloadHash, props.walletId, props.playerId,   // não vem de provedor (interpretação I8)
+      undefined, undefined, WagerTransactionKind.Opening, props.money, undefined, props.correlationId, props.createdAt,
+      WagerTransactionStatus.Pending, undefined, undefined, undefined, undefined, 0, undefined, props.createdAt,
+    );
   }
 
   static rehydrate(state: WagerTransactionState): WagerTransaction {
-    return new WagerTransaction({ ...state });                                                  // só reconstrói, não revalida transições
+    return new WagerTransaction(                                                                // só reconstrói, não revalida transições
+      state.id, state.providerId, state.externalTransactionId, state.idempotencyKey, state.payloadHash, state.walletId, state.playerId,
+      state.roundId, state.gameId, state.kind, state.money, state.referenceExternalTransactionId, state.correlationId, state.createdAt,
+      state.status, state.referenceTransactionId, state.failureCode, state.processedAt, state.balanceAfter, state.attempts, state.nextAttemptAt, state.updatedAt,
+    );
   }
 
   // ----------------------------------------------------------------------------------------------------
-  //                                          LEITURA
+  //                                  LEITURA DO ESTADO DA DECISÃO
   // ----------------------------------------------------------------------------------------------------
-  get id() { return this.state.id; }
-  get providerId() { return this.state.providerId; }
-  get externalTransactionId() { return this.state.externalTransactionId; }
-  get idempotencyKey() { return this.state.idempotencyKey; }
-  get payloadHash() { return this.state.payloadHash; }
-  get walletId() { return this.state.walletId; }
-  get playerId() { return this.state.playerId; }
-  get roundId() { return this.state.roundId; }
-  get gameId() { return this.state.gameId; }
-  get kind() { return this.state.kind; }
-  get money() { return this.state.money; }
-  get referenceExternalTransactionId() { return this.state.referenceExternalTransactionId; }
-  get referenceTransactionId() { return this.state.referenceTransactionId; }
-  get status() { return this.state.status; }
-  get failureCode() { return this.state.failureCode; }
-  get balanceAfter() { return this.state.balanceAfter; }
-  get correlationId() { return this.state.correlationId; }
-  get attempts() { return this.state.attempts; }
-  get nextAttemptAt() { return this.state.nextAttemptAt; }
-  get createdAt() { return this.state.createdAt; }
-  get updatedAt() { return this.state.updatedAt; }
-  get processedAt() { return this.state.processedAt; }
+  get status(): WagerTransactionStatus { return this._status; }
+  get referenceTransactionId(): string | undefined { return this._referenceTransactionId; }
+  get failureCode(): FailureCode | undefined { return this._failureCode; }
+  get processedAt(): Date | undefined { return this._processedAt; }
+  get balanceAfter(): Money | undefined { return this._balanceAfter; }
+  get attempts(): number { return this._attempts; }
+  get nextAttemptAt(): Date | undefined { return this._nextAttemptAt; }
+  get updatedAt(): Date { return this._updatedAt; }
 
   toState(): WagerTransactionState {
-    return { ...this.state };                                                                   // cópia: quem lê não muda o estado por fora
+    return {                                                                                    // cópia: quem lê não muda o estado por fora
+      id: this.id, providerId: this.providerId, externalTransactionId: this.externalTransactionId, idempotencyKey: this.idempotencyKey, payloadHash: this.payloadHash,
+      walletId: this.walletId, playerId: this.playerId, roundId: this.roundId, gameId: this.gameId, kind: this.kind, money: this.money,
+      referenceExternalTransactionId: this.referenceExternalTransactionId, referenceTransactionId: this._referenceTransactionId, status: this._status,
+      failureCode: this._failureCode, balanceAfter: this._balanceAfter, correlationId: this.correlationId, attempts: this._attempts,
+      nextAttemptAt: this._nextAttemptAt, createdAt: this.createdAt, updatedAt: this._updatedAt, processedAt: this._processedAt,
+    };
   }
 
   // ----------------------------------------------------------------------------------------------------
@@ -175,79 +171,79 @@ export class WagerTransaction {
   // ----------------------------------------------------------------------------------------------------
   markProcessed(referenceTransactionId: string | undefined, observedBalance: Money, at: Date): void {
     this.assertNotTerminal("markProcessed");
-    this.state.status = WagerTransactionStatus.Processed;
-    this.state.referenceTransactionId = referenceTransactionId;
-    this.state.balanceAfter = observedBalance;
-    this.state.processedAt = at;
-    this.state.nextAttemptAt = undefined;
-    this.state.updatedAt = at;
+    this._status = WagerTransactionStatus.Processed;
+    this._referenceTransactionId = referenceTransactionId;
+    this._balanceAfter = observedBalance;
+    this._processedAt = at;
+    this._nextAttemptAt = undefined;
+    this._updatedAt = at;
   }
 
   markPendingReference(observedBalance: Money, now: Date, retryPolicy: RetryPolicy): void {
-    if (this.state.status !== WagerTransactionStatus.Pending) {
+    if (this._status !== WagerTransactionStatus.Pending) {
       throw new InvalidTransactionStateError(`markPendingReference só sai de PENDING, a transação ${this.id} está ${this.status}`);
     }
-    this.state.status = WagerTransactionStatus.PendingReference;
-    this.state.balanceAfter = observedBalance;
-    this.state.attempts = 0;
-    this.state.nextAttemptAt = new Date(now.getTime() + fullJitterDelayMilliseconds(0, retryPolicy));
-    this.state.updatedAt = now;
+    this._status = WagerTransactionStatus.PendingReference;
+    this._balanceAfter = observedBalance;
+    this._attempts = 0;
+    this._nextAttemptAt = new Date(now.getTime() + fullJitterDelayMilliseconds(0, retryPolicy));
+    this._updatedAt = now;
   }
 
   reject(code: FailureCode, observedBalance: Money, at: Date): void {
     this.assertNotTerminal("reject");
-    this.state.status = WagerTransactionStatus.Rejected;
-    this.state.failureCode = code;
-    this.state.balanceAfter = observedBalance;
-    this.state.nextAttemptAt = undefined;
-    this.state.updatedAt = at;
+    this._status = WagerTransactionStatus.Rejected;
+    this._failureCode = code;
+    this._balanceAfter = observedBalance;
+    this._nextAttemptAt = undefined;
+    this._updatedAt = at;
   }
 
   fail(code: FailureCode, at: Date): void {
-    if (this.state.status !== WagerTransactionStatus.PendingReference) {                        // PENDING -> FAILED não existe (seção 6.3)
+    if (this._status !== WagerTransactionStatus.PendingReference) {                             // PENDING -> FAILED não existe (seção 6.3)
       throw new InvalidTransactionStateError(`fail só sai de PENDING_REFERENCE, a transação ${this.id} está ${this.status}`);
     }
-    this.state.status = WagerTransactionStatus.Failed;
-    this.state.failureCode = code;
-    this.state.nextAttemptAt = undefined;
-    this.state.updatedAt = at;
+    this._status = WagerTransactionStatus.Failed;
+    this._failureCode = code;
+    this._nextAttemptAt = undefined;
+    this._updatedAt = at;
   }
 
   // ---- nova tentativa do worker sem referência: não é transição de estado
   scheduleReferenceRetry(now: Date, retryPolicy: RetryPolicy): void {
-    if (this.state.status !== WagerTransactionStatus.PendingReference) {
+    if (this._status !== WagerTransactionStatus.PendingReference) {
       throw new InvalidTransactionStateError(`scheduleReferenceRetry só vale em PENDING_REFERENCE, a transação ${this.id} está ${this.status}`);
     }
-    this.state.attempts = this.state.attempts + 1;
-    this.state.nextAttemptAt = new Date(now.getTime() + fullJitterDelayMilliseconds(this.state.attempts, retryPolicy));
-    this.state.updatedAt = now;
+    this._attempts = this._attempts + 1;
+    this._nextAttemptAt = new Date(now.getTime() + fullJitterDelayMilliseconds(this._attempts, retryPolicy));
+    this._updatedAt = now;
   }
 
   // ----------------------------------------------------------------------------------------------------
   //                                     CONSULTAS DE DOMÍNIO
   // ----------------------------------------------------------------------------------------------------
   isTerminal(): boolean {
-    return TERMINAL_STATUSES.includes(this.state.status);
+    return TERMINAL_STATUSES.includes(this._status);
   }
 
   affectsBalance(): boolean {
-    return this.state.kind !== WagerTransactionKind.Loss;                                       // LOSS só registra o resultado
+    return this.kind !== WagerTransactionKind.Loss;                                             // LOSS só registra o resultado
   }
 
   requiresReference(): boolean {
-    return this.state.kind === WagerTransactionKind.Refund || this.state.kind === WagerTransactionKind.Rollback;
+    return this.kind === WagerTransactionKind.Refund || this.kind === WagerTransactionKind.Rollback;
   }
 
   matchesPayload(payloadHash: string): boolean {
-    return this.state.payloadHash === payloadHash;
+    return this.payloadHash === payloadHash;
   }
 
   hasReferenceWaitExpired(now: Date, ttlMilliseconds: number): boolean {
-    return now.getTime() - this.state.createdAt.getTime() >= ttlMilliseconds;                   // TTL contado do created_at da pendente
+    return now.getTime() - this.createdAt.getTime() >= ttlMilliseconds;                         // TTL contado do created_at da pendente
   }
 
   ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection {
-    switch (this.state.kind) {
+    switch (this.kind) {
       case WagerTransactionKind.Bet:
         return LedgerDirection.Debit;
       case WagerTransactionKind.Win:

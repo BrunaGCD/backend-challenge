@@ -126,7 +126,7 @@ As garantias de unicidade, imutabilidade e não-negatividade estão no schema ([
 
 ## 7. Estados da transação
 
-`PENDING` existe só em memória: a transação nasce assim na factory e sai dele antes do commit, e o CHECK do banco nem aceita esse valor. As transições válidas, em [wager-transaction.ts](src/domain/wager-transaction.ts):
+`PENDING` existe só em memória: a transação nasce assim na factory e sai dele antes do commit, e o CHECK do banco nem aceita esse valor. A classe segue a forma do esqueleto da seção 6.3: os campos de identidade e de negócio são `public readonly` no construtor privado, e só o estado da decisão (`_status`, `_referenceTransactionId`, `_failureCode`, `_processedAt`, mais o saldo observado e o agendamento do worker) é privado e mutável, lido por getters e mudado só pelas transições. As transições válidas, em [wager-transaction.ts](src/domain/wager-transaction.ts):
 
 | De | Para | Quando |
 |---|---|---|
