@@ -148,6 +148,8 @@ describe("falhas na publicação", () => {
     await waitUntil("a outra instância publicar", async () => (await unpublishedCount()) === 0);
     const received = (await drainQueue(queues.eventsQueueName)).map((message) => JSON.parse(message.body));
     expect(received.filter((event) => event.aggregateId === walletId)).toHaveLength(4);
+    await survivor.stop();                                                                      // senão o publisher dela pega os eventos do próximo teste
+    offloadedApps.splice(offloadedApps.indexOf(survivor), 1);                                   // já parada, o afterAll não para de novo
   });
 });
 
