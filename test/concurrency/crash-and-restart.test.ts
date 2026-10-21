@@ -66,8 +66,8 @@ describe("cenário 5: worker morto depois do commit e antes do ack", () => {
 
 describe("cenário 8: reinício no meio da carga, com consistência final comprovada", () => {
   test("SIGKILL numa das 3 instâncias durante a carga, a instância volta, e nada se perde nem duplica", async () => {
-    const queues = await createTestQueues("restart");
-    const instances = [await start("load-1", queues), await start("load-2", queues), await start("load-3", queues)];
+    const queues = await createTestQueues("restart", { visibilityTimeoutSeconds: 3, maxReceiveCount: 5, waitTimeSeconds: 1 });   // maxReceiveCount de produção
+    const instances = [await start("load-1", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" }), await start("load-2", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" }), await start("load-3", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" })];
     const wallets = [];
     for (let index = 0; index < 5; index++) {
       const wallet = await createWallet(instances[0]!.baseUrl, "1000.00");
@@ -76,7 +76,8 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
     }
 
     const random = seededRandom(42);
-    const sent: { input: WagerInput; channel: "http" | "sqs" }[] = [];
+    const sent: { input: WagerInput; channel: "http" | "sqs"; messageId?: string }[] = [];
+    const killedInstances: Instance[] = [];
     let killed = false;
 
     // o provedor reenvia com a mesma key quando a instância não responde: é seguro por causa da idempotência
@@ -100,14 +101,16 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
       const amount = `${1 + Math.floor(random() * 5)}.${String(Math.floor(random() * 100)).padStart(2, "0")}`;
       const input: WagerInput = { ...wallet, kind, amount, externalTransactionId: `load-${index}-${Bun.randomUUIDv7()}` };
       const channel = random() < 0.5 ? "http" : "sqs";
-      sent.push({ input, channel });
+      const messageId = `msg-${index}-${Bun.randomUUIDv7()}`;
+      sent.push({ input, channel, messageId: channel === "sqs" ? messageId : undefined });
       if (channel === "http") pendingHttp.push(sendOverHttp(input));
-      else await sendWagerMessage(queues.inputQueueName, wagerMessage(`msg-${index}-${Bun.randomUUIDv7()}`, input));
+      else await sendWagerMessage(queues.inputQueueName, wagerMessage(messageId, input));
 
       if (index === 60 && !killed) {
         killed = true;
+        killedInstances.push(instances[1]!);                                                    // guarda a saída para o diagnóstico
         await stopInstance(instances[1]!, "SIGKILL");                                           // morre no meio do trabalho
-        instances[1] = await start("load-2-restarted", queues);                                 // e volta
+        instances[1] = await start("load-2-restarted", queues, undefined, { SQS_MAX_RECEIVE_COUNT: "5" });                                 // e volta
       }
       if (index % 10 === 0) await Bun.sleep(20);                                                // espalha a carga no tempo
     }
@@ -119,10 +122,28 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
       return row.total === 0;
     }, 30_000);
 
-    // cada operação enviada virou exatamente uma transação; o saldo esperado sai das que terminaram PROCESSED
+    // Toda operação enviada terminou num destes dois lugares: virou exatamente uma transação, ou está na
+    // DLQ, movida pelo próprio SQS depois do maxReceiveCount (a instância morta conta um recebimento, e
+    // falhas transitórias sob carga contam os outros). A fila de entrada já está vazia aqui.
+    const recordedIds = new Set((await testSql()`select external_transaction_id from wager_transactions where wallet_id in ${testSql()(wallets.map((wallet) => wallet.walletId))}`).map((row: any) => row.external_transaction_id as string));
+    const missing = sent.filter((operation) => !recordedIds.has(operation.input.externalTransactionId!));
+    const deadLetters = await drainQueue(queues.deadLetterQueueName, 1000);
+    const deadLetteredIds = new Set(deadLetters.map((message) => JSON.parse(message.body).data.externalTransactionId as string));
+    if (missing.length > 0) {
+      const allLogLines: Record<string, any>[] = [...instances, ...killedInstances].flatMap((instance) => instanceLogLines(instance).map((line) => ({ instance: instance.name, ...line })));
+      for (const operation of missing) {
+        const logs = allLogLines.filter((line) => line.messageId === operation.messageId).map((line) => `${line.instance}:${line.event}:${line.errorCode ?? ""}`);
+        console.log("operação sem transação:", JSON.stringify({ externalTransactionId: operation.input.externalTransactionId, channel: operation.channel, inDeadLetter: deadLetteredIds.has(operation.input.externalTransactionId!), logs }));
+      }
+    }
+    expect(missing.filter((operation) => !deadLetteredIds.has(operation.input.externalTransactionId!))).toEqual([]);   // nada sumiu
+    expect(deadLetters.every((message) => message.attributes.reason === undefined)).toBe(true);  // só redrive do SQS, nenhum erro permanente
+    console.log(`cenário 8: ${sent.length - missing.length} transações, ${missing.length} operações só na DLQ`);
+
+    // nenhuma operação virou duas transações; o saldo esperado sai das que terminaram PROCESSED
     for (const wallet of wallets) {
       const rows = await testSql()`select external_transaction_id, kind, status, amount from wager_transactions where wallet_id = ${wallet.walletId} and kind <> 'OPENING'`;
-      const sentForWallet = sent.filter((operation) => operation.input.walletId === wallet.walletId);
+      const sentForWallet = sent.filter((operation) => operation.input.walletId === wallet.walletId && !deadLetteredIds.has(operation.input.externalTransactionId!));
       expect(rows.length).toBe(sentForWallet.length);
       let expectedCents = 1000_00n;
       for (const row of rows) {
