@@ -7,13 +7,18 @@
 //   cada lançamento tem um WalletBalanceChanged na outbox, e vice-versa;
 //   transação PROCESSED que move saldo tem exatamente um lançamento; as outras, nenhum.
 import { expect } from "bun:test";
+import type { SQL } from "bun";
 import { Money } from "../../src/domain/money";
 import { LedgerDirection, WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";
 import { testSql } from "./harness";
 import { ledgerChainProblems } from "./ledger-chain";
 
+// todas as consultas num snapshot só: saldo, ledger e outbox coerentes entre si mesmo com trabalho em andamento
 export async function walletInvariantProblems(walletId: string): Promise<string[]> {
-  const sql = testSql();
+  return testSql().begin("isolation level repeatable read read only", (snapshot) => problemsInSnapshot(snapshot, walletId));
+}
+
+async function problemsInSnapshot(sql: SQL, walletId: string): Promise<string[]> {
   const [wallet] = await sql`select balance, currency, version from wallets where id = ${walletId}`;
   if (!wallet) return [`wallet ${walletId} não existe`];
 

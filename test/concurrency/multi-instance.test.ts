@@ -4,7 +4,7 @@
 // Cenários 1, 2, 3, 4, 6 e 7 da seção 13. Paralelismo real (processos separados), nada de mock.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
-import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, sendWagerMessage, submitWager, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type TestQueues } from "../support/harness";
+import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitLikeProvider, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type ProviderRetryCounter, type TestQueues, type WagerInput } from "../support/harness";
 import { instanceLogLines, spawnInstance, stopInstance, type Instance } from "../support/instances";
 import { expectWalletInvariants } from "../support/invariants";
 
@@ -14,6 +14,13 @@ const touchedWallets: string[] = [];
 const playerIds: string[] = [];
 
 const pick = (index: number) => instances[index % instances.length]!;                           // reparte entre as 3
+const random = seededRandom(42);
+const retryCounter: ProviderRetryCounter = { serviceUnavailable: 0, networkErrors: 0 };
+
+// manda para a instância do índice e, se precisar reenviar (503 ou conexão caída), para a seguinte
+function send(index: number, input: WagerInput) {
+  return submitLikeProvider([pick(index).baseUrl, pick(index + 1).baseUrl], input, random, retryCounter);
+}
 
 async function newWallet(initialBalance: string) {
   const wallet = await createWallet(pick(touchedWallets.length).baseUrl, initialBalance);
@@ -58,6 +65,7 @@ afterAll(async () => {
     expect(line).toHaveProperty("walletId");
     expect(line).toHaveProperty("providerId");
   }
+  console.log(`reenvios do cliente (papel do provedor): ${retryCounter.serviceUnavailable} por 503, ${retryCounter.networkErrors} por conexão caída`);
   await Promise.all(instances.map((instance) => stopInstance(instance, "SIGKILL")));
 });
 
@@ -66,7 +74,7 @@ describe("cenário 1: a mesma aposta enviada 50 vezes em paralelo", () => {
     const { walletId, playerId } = await newWallet("100.00");
     const bet = { walletId, playerId, kind: "BET", amount: "30.00", externalTransactionId: `bet-${Bun.randomUUIDv7()}` };
 
-    const httpCopies = Array.from({ length: 40 }, (_, index) => submitWager(pick(index).baseUrl, bet));
+    const httpCopies = Array.from({ length: 40 }, (_, index) => send(index, bet));
     const queueCopies = Array.from({ length: 10 }, (_, index) => sendWagerMessage(queues.inputQueueName, wagerMessage(`msg-${index}-${Bun.randomUUIDv7()}`, bet)));
     const [responses] = await Promise.all([Promise.all(httpCopies), Promise.all(queueCopies)]);
     await waitUntil("fila consumida", inputQueueIsEmpty);
@@ -86,14 +94,14 @@ describe("cenário 2: duas apostas de 80.00 disputando 100.00", () => {
       const { walletId, playerId } = await newWallet("100.00");
       const first = { walletId, playerId, kind: "BET", amount: "80.00", externalTransactionId: `bet-a-${Bun.randomUUIDv7()}` };
       const second = { walletId, playerId, kind: "BET", amount: "80.00", externalTransactionId: `bet-b-${Bun.randomUUIDv7()}` };
-      const responses = await Promise.all([submitWager(pick(round).baseUrl, first), submitWager(pick(round + 1).baseUrl, second)]);
+      const responses = await Promise.all([send(round, first), send(round + 1, second)]);
 
       const statuses = responses.map((response) => response.body.status).sort();
       expect(statuses).toEqual(["PROCESSED", "REJECTED"]);                                     // exatamente uma de cada
       expect(responses.find((response) => response.body.status === "REJECTED")!.body.failureCode).toBe("INSUFFICIENT_FUNDS");
       expect(await ledgerDebits(walletId)).toBe(1);
 
-      const retries = await Promise.all([submitWager(pick(round + 2).baseUrl, first), submitWager(pick(round).baseUrl, second)]);   // o provedor reenvia as duas
+      const retries = await Promise.all([send(round + 2, first), send(round, second)]);   // o provedor reenvia as duas
       expect(retries.every((response) => response.body.idempotentReplay)).toBe(true);
       expect(await ledgerDebits(walletId)).toBe(1);                                             // nenhum retry duplica o débito
       const wallet = await httpRequest(pick(round).baseUrl, "GET", `/wallets/${walletId}`);
@@ -107,7 +115,7 @@ describe("cenário 3: wallets distintas em paralelo", () => {
     const wallets = [];
     for (let index = 0; index < 20; index++) wallets.push(await newWallet("50.00"));
     const startedAt = performance.now();
-    const all = wallets.flatMap((wallet, walletIndex) => Array.from({ length: 5 }, (_, betIndex) => submitWager(pick(walletIndex + betIndex).baseUrl, { ...wallet, kind: "BET", amount: "10.00" })));
+    const all = wallets.flatMap((wallet, walletIndex) => Array.from({ length: 5 }, (_, betIndex) => send(walletIndex + betIndex, { ...wallet, kind: "BET", amount: "10.00" })));
     const responses = await Promise.all(all);
     const elapsedSeconds = (performance.now() - startedAt) / 1000;
     expect(responses.every((response) => response.status === 200 && response.body.status === "PROCESSED")).toBe(true);
@@ -123,7 +131,7 @@ describe("cenário 4: três instâncias ao mesmo tempo, HTTP e fila misturados",
   test("HTTP em todas as instâncias e mensagens consumidas pelos consumidores das três", async () => {
     const wallets = [];
     for (let index = 0; index < 9; index++) wallets.push(await newWallet("100.00"));
-    const httpBets = wallets.flatMap((wallet, walletIndex) => [0, 1, 2].map((instanceIndex) => submitWager(pick(walletIndex + instanceIndex).baseUrl, { ...wallet, kind: "BET", amount: "5.00" })));
+    const httpBets = wallets.flatMap((wallet, walletIndex) => [0, 1, 2].map((instanceIndex) => send(walletIndex + instanceIndex, { ...wallet, kind: "BET", amount: "5.00" })));
     const queueWins = wallets.flatMap((wallet) => [0, 1, 2, 3].map((index) => sendWagerMessage(queues.inputQueueName, wagerMessage(`msg-win-${index}-${Bun.randomUUIDv7()}`, { ...wallet, kind: "WIN", amount: "2.50" }))));
     const [responses] = await Promise.all([Promise.all(httpBets), Promise.all(queueWins)]);
     await waitUntil("fila consumida", inputQueueIsEmpty);
@@ -140,12 +148,13 @@ describe("cenário 4: três instâncias ao mesmo tempo, HTTP e fila misturados",
 
 describe("cenário 6: os publishers das três instâncias sobre a mesma outbox", () => {
   test("todo evento publicado, cada eventId uma vez só na fila de eventos", async () => {
+    // o banco é da execução inteira: conta só os eventos das wallets deste arquivo, que vão para estas filas
     await waitUntil("outbox vazia", async () => {
-      const [row] = await testSql()`select count(*)::int as total from outbox_messages where published_at is null`;
+      const [row] = await testSql()`select count(*)::int as total from outbox_messages where published_at is null and aggregate_id in ${testSql()(touchedWallets)}`;
       return row.total === 0;
     }, 30_000);
     const received = (await drainQueue(queues.eventsQueueName, 2000)).map((message) => JSON.parse(message.body).eventId as string);
-    const [outbox] = await testSql()`select count(*)::int as total from outbox_messages`;
+    const [outbox] = await testSql()`select count(*)::int as total from outbox_messages where aggregate_id in ${testSql()(touchedWallets)}`;
     expect(new Set(received).size).toBe(received.length);                                      // sem duplicata
     expect(received.length).toBe(outbox.total);                                                 // nenhum evento confirmado perdido
   });
@@ -156,12 +165,12 @@ describe("cenário 7: ROLLBACK e REFUND antes da referência", () => {
     const { walletId, playerId } = await newWallet("100.00");
     const betExternalId = `bet-${Bun.randomUUIDv7()}`;
     const winExternalId = `win-${Bun.randomUUIDv7()}`;
-    const refund = await submitWager(pick(0).baseUrl, { walletId, playerId, kind: "REFUND", amount: "20.00", reference: betExternalId, externalTransactionId: `refund-${Bun.randomUUIDv7()}` });
+    const refund = await send(0, { walletId, playerId, kind: "REFUND", amount: "20.00", reference: betExternalId, externalTransactionId: `refund-${Bun.randomUUIDv7()}` });
     const rollbackOfWin = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "ROLLBACK", amount: "7.00", reference: winExternalId });
     await sendWagerMessage(queues.inputQueueName, rollbackOfWin);
     expect(refund.status).toBe(202);
 
-    await submitWager(pick(1).baseUrl, { walletId, playerId, kind: "BET", amount: "20.00", externalTransactionId: betExternalId });
+    await send(1, { walletId, playerId, kind: "BET", amount: "20.00", externalTransactionId: betExternalId });
     await sendWagerMessage(queues.inputQueueName, wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "WIN", amount: "7.00", externalTransactionId: winExternalId }));
 
     await waitUntil("as duas reversões processadas", async () => {

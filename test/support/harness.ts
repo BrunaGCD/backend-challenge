@@ -208,6 +208,29 @@ export async function submitWager(baseUrl: string, input: WagerInput, idempotenc
   return httpRequest(baseUrl, "POST", "/wagering/transactions", body, { "Idempotency-Key": idempotencyKey ?? `${body.providerId}:${body.externalTransactionId}` });
 }
 
+// O provedor reenvia com a mesma key quando recebe 503 (lock_timeout numa wallet disputada, seção 8)
+// ou quando a conexão cai antes da resposta: as duas situações são seguras por causa da idempotência.
+// Os testes de concorrência fazem o papel do provedor e contam quantas vezes isso aconteceu.
+export interface ProviderRetryCounter {
+  serviceUnavailable: number;
+  networkErrors: number;
+}
+
+export async function submitLikeProvider(baseUrls: string[], input: WagerInput, random: () => number, counter: ProviderRetryCounter): Promise<HttpResult> {
+  const fixedInput = { ...input, externalTransactionId: input.externalTransactionId ?? `ext-${Bun.randomUUIDv7()}` };   // o reenvio é a mesma operação, com a mesma key
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const response = await submitWager(baseUrls[attempt % baseUrls.length]!, fixedInput);
+      if (response.status !== 503) return response;
+      counter.serviceUnavailable = counter.serviceUnavailable + 1;
+    } catch {
+      counter.networkErrors = counter.networkErrors + 1;                                        // conexão caiu: não dá para saber se processou, então reenvia
+    }
+    await Bun.sleep(Math.floor(random() * 200 * Math.min(2 ** attempt, 8)));                   // backoff com jitter, como um provedor faria
+  }
+  throw new Error(`operação ${fixedInput.externalTransactionId} não terminou depois de 30 tentativas`);
+}
+
 // ----------------------------------------------------------------------------------------------------
 //                                          FILA
 // ----------------------------------------------------------------------------------------------------
