@@ -16,6 +16,7 @@ x-app: &app
   image: wagering-processor:local
   init: true                                   # o sinal chega no Bun
   stop_grace_period: 30s                       # maior que os 20 s internos para concluir mensagens
+  restart: unless-stopped                      # processo que morre volta sozinho; docker compose stop continua parando
   depends_on:
     migrate:
       condition: service_completed_successfully
