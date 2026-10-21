@@ -186,8 +186,10 @@ export interface WagerInput {
   providerId?: string;
 }
 
-export function wagerBody(input: WagerInput) {
-  const body: Record<string, unknown> = {
+export type WagerBody = Record<string, unknown> & { providerId: string; externalTransactionId: string; walletId: string };
+
+export function wagerBody(input: WagerInput): WagerBody {
+  const body: WagerBody = {
     providerId: input.providerId ?? "provider-a",
     externalTransactionId: input.externalTransactionId ?? `ext-${Bun.randomUUIDv7()}`,
     playerId: input.playerId,

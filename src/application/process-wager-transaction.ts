@@ -57,8 +57,8 @@ export class ProcessWagerTransaction {
     addToLogContext({ walletId: command.walletId, providerId: command.providerId, correlationId: context.correlationId });
     const payloadHash = computePayloadHash(command);
 
-    // atalho sem lock: replay não entra na fila do lock da wallet
-    const replay = await this.findReplay(idempotencyKey, payloadHash, command);
+    // atalho sem lock, só pela key: replay não entra na fila do lock da wallet
+    const replay = await this.findReplay(idempotencyKey, payloadHash);
     if (replay) return this.finishReplay(replay, context, startedAt);
 
     try {
@@ -70,8 +70,9 @@ export class ProcessWagerTransaction {
       if (constraint && IDEMPOTENCY_CONSTRAINTS.includes(constraint)) {
         // duas cópias que travaram wallets diferentes: a outra ganhou o INSERT, então consulta de novo
         concurrencyConflictsTotal.inc({ type: "unique_violation" });
-        const winner = await this.findReplay(idempotencyKey, payloadHash, command);
+        const winner = await this.findReplay(idempotencyKey, payloadHash);
         if (winner) return this.finishReplay(winner, context, startedAt);
+        await this.rejectReusedExternalId(command);                                             // a key não existe, então foi o par (provider, external)
       }
       const conflictType = concurrencyConflictType(error);
       if (conflictType && conflictType !== "unique_violation") concurrencyConflictsTotal.inc({ type: conflictType });
@@ -101,8 +102,9 @@ export class ProcessWagerTransaction {
     if (!wallet) throw new WalletNotFoundError(`wallet ${command.walletId} não existe`);
 
     // de novo, agora serializado pela wallet: fecha a corrida das cópias simultâneas
-    const replayUnderLock = await this.findReplay(idempotencyKey, payloadHash, command);
+    const replayUnderLock = await this.findReplay(idempotencyKey, payloadHash);
     if (replayUnderLock) return { kind: "decided", transaction: replayUnderLock, idempotentReplay: true };
+    await this.rejectReusedExternalId(command);
 
     const transaction = WagerTransaction.create({ ...command, id: this.ids.newId(), idempotencyKey, payloadHash, correlationId: context.correlationId, createdAt: now });
     addToLogContext({ transactionId: transaction.id });
@@ -191,19 +193,21 @@ export class ProcessWagerTransaction {
   // ====================================================================================================
   //                                        PEDAÇOS COMUNS
   // ====================================================================================================
-  private async findReplay(idempotencyKey: string, payloadHash: string, command: WagerCommand): Promise<WagerTransaction | undefined> {
+  // mesma key e mesmo hash é replay; mesma key e hash diferente é conflito, nunca replay
+  private async findReplay(idempotencyKey: string, payloadHash: string): Promise<WagerTransaction | undefined> {
     const byKey = await this.repositories.transactions.findByIdempotencyKey(idempotencyKey);
-    if (byKey) {
-      if (byKey.matchesPayload(payloadHash)) return byKey;
-      idempotencyConflictsTotal.inc({ type: "idempotency_key" });
-      throw new IdempotencyKeyConflictError(`a Idempotency-Key já foi usada por outra operação (transação ${byKey.id})`);
-    }
+    if (!byKey) return undefined;
+    if (byKey.matchesPayload(payloadHash)) return byKey;
+    idempotencyConflictsTotal.inc({ type: "idempotency_key" });
+    throw new IdempotencyKeyConflictError(`a Idempotency-Key já foi usada por outra operação (transação ${byKey.id})`);
+  }
+
+  // chamada depois que a key não foi achada: o mesmo (providerId, externalTransactionId) com outra key é conflito
+  private async rejectReusedExternalId(command: WagerCommand): Promise<void> {
     const byExternalId = await this.repositories.transactions.findByProviderAndExternalId(command.providerId, command.externalTransactionId);
-    if (byExternalId) {
-      idempotencyConflictsTotal.inc({ type: "external_transaction_id" });
-      throw new ExternalTransactionIdConflictError(`externalTransactionId já foi usado com outra Idempotency-Key (transação ${byExternalId.id})`);
-    }
-    return undefined;
+    if (!byExternalId) return;
+    idempotencyConflictsTotal.inc({ type: "external_transaction_id" });
+    throw new ExternalTransactionIdConflictError(`externalTransactionId já foi usado com outra Idempotency-Key (transação ${byExternalId.id})`);
   }
 
   private finishReplay(transaction: WagerTransaction, context: ProcessContext, startedAt: number): ProcessResult {
