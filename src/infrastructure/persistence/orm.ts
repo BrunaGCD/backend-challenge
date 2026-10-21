@@ -14,6 +14,7 @@ export interface OrmOptions {
   poolMax: number;
   idleInTransactionTimeoutMilliseconds: number;
   connectTimeoutMilliseconds: number;
+  silentMigrations?: boolean;                                                                   // testes não precisam do log do Migrator
 }
 
 export const MIGRATIONS = [CreateWallets, CreateWagerTransactions, CreateWalletLedgerEntries, CreateInboxAndOutbox];   // em ordem
@@ -23,7 +24,7 @@ export async function createOrm(options: OrmOptions): Promise<MikroORM> {
     clientUrl: options.databaseUrl,
     entities: ALL_RECORDS,
     extensions: [Migrator],
-    migrations: { migrationsList: MIGRATIONS, tableName: "schema_migrations", transactional: true, allOrNothing: true, snapshot: false },   // schema vem só das migrations escritas à mão
+    migrations: { migrationsList: MIGRATIONS, tableName: "schema_migrations", transactional: true, allOrNothing: true, snapshot: false, silent: options.silentMigrations ?? false },   // schema vem só das migrations escritas à mão
     pool: { min: 0, max: options.poolMax },
     driverOptions: {
       connectionTimeoutMillis: options.connectTimeoutMilliseconds,                              // banco fora não pode travar a requisição para sempre
