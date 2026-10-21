@@ -147,16 +147,31 @@ describe("cenário 4: três instâncias ao mesmo tempo, HTTP e fila misturados",
 });
 
 describe("cenário 6: os publishers das três instâncias sobre a mesma outbox", () => {
-  test("todo evento publicado, cada eventId uma vez só na fila de eventos", async () => {
+  test("cada evento da outbox foi publicado uma vez só, contando as publicações de cada instância, e nenhum se perdeu", async () => {
     // o banco é da execução inteira: conta só os eventos das wallets deste arquivo, que vão para estas filas
     await waitUntil("outbox vazia", async () => {
       const [row] = await testSql()`select count(*)::int as total from outbox_messages where published_at is null and aggregate_id in ${testSql()(touchedWallets)}`;
       return row.total === 0;
     }, 30_000);
+    const outboxIds: string[] = (await testSql()`select id from outbox_messages where aggregate_id in ${testSql()(touchedWallets)}`).map((row: any) => row.id as string);
+
+    // a fila FIFO descartaria uma cópia com o mesmo eventId, então a contagem vem do que cada publisher
+    // registrou como publicação aceita pelo SQS (uma linha de log por evento por tentativa)
+    const publicationsPerEvent = new Map<string, number>();
+    for (const line of instances.flatMap(instanceLogLines)) {
+      if (line.event !== "outbox_event_published") continue;
+      const outboxMessageId = line.outboxMessageId as string;
+      publicationsPerEvent.set(outboxMessageId, (publicationsPerEvent.get(outboxMessageId) ?? 0) + 1);
+    }
+    const publishedTwice = outboxIds.filter((id) => (publicationsPerEvent.get(id) ?? 0) > 1);
+    const neverPublished = outboxIds.filter((id) => !publicationsPerEvent.has(id));
+    const publishersThatWorked = instances.filter((instance) => instanceLogLines(instance).some((line) => line.event === "outbox_event_published")).length;
+    console.log(`cenário 6: ${outboxIds.length} eventos na outbox, publicados por ${publishersThatWorked} das 3 instâncias, ${publishedTwice.length} publicados mais de uma vez`);
+    expect(publishedTwice).toEqual([]);                                                         // SKIP LOCKED: nenhuma linha pega por dois publishers
+    expect(neverPublished).toEqual([]);
+
     const received = (await drainQueue(queues.eventsQueueName, 2000)).map((message) => JSON.parse(message.body).eventId as string);
-    const [outbox] = await testSql()`select count(*)::int as total from outbox_messages where aggregate_id in ${testSql()(touchedWallets)}`;
-    expect(new Set(received).size).toBe(received.length);                                      // sem duplicata
-    expect(received.length).toBe(outbox.total);                                                 // nenhum evento confirmado perdido
+    expect(new Set(received)).toEqual(new Set(outboxIds));                                      // nenhum evento confirmado perdido no caminho
   });
 });
 

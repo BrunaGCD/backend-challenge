@@ -38,6 +38,7 @@ export class OutboxPublisher {
         if (outcome.publishedIds.includes(message.id)) {
           message.markPublished(publishedAt);
           outboxPublishDelaySeconds.observe((publishedAt.getTime() - message.occurredAt.getTime()) / 1000);
+          logger.info({ event: "outbox_event_published", outboxMessageId: message.id, eventType: message.eventType, walletId: message.aggregateId }, "evento publicado");   // uma linha por publicação aceita: é como se conta cópia
         } else {
           const error = failureById.get(message.id) ?? "sem resposta para esta mensagem no lote";
           message.scheduleRetry(publishedAt, this.settings.retryPolicy, error);

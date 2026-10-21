@@ -1,10 +1,12 @@
 // ====================================================================================================
-//      OUTBOX: PUBLISHERS CONCORRENTES, RETRY QUANDO O SQS FALHA, E CRASH ENTRE COMMIT E PUBLICAÇÃO
+//     OUTBOX: PUBLISHERS CONCORRENTES, RETRY, CRASH ANTES E DEPOIS DO COMMIT, CÓPIA SEGURA
 // ====================================================================================================
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { EventPublisher } from "../../src/application/ports";
 import type { OutboxMessage } from "../../src/domain/outbox-message";
-import { createTestQueues, createWallet, drainQueue, startInProcessApp, submitWager, testConfig, testSql, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
+import { SendMessageBatchCommand } from "@aws-sdk/client-sqs";                                 // a cópia publicada depois da janela de deduplicação
+import { consumeEventsUntilIdle, createExampleConsumerTables, movedTotal } from "../support/example-event-consumer";
+import { createTestQueues, createWallet, drainQueue, queueUrl, startInProcessApp, submitWager, testConfig, testSql, testSqsClient, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";
 
 let queues: TestQueues;
@@ -146,5 +148,52 @@ describe("falhas na publicação", () => {
     await waitUntil("a outra instância publicar", async () => (await unpublishedCount()) === 0);
     const received = (await drainQueue(queues.eventsQueueName)).map((message) => JSON.parse(message.body));
     expect(received.filter((event) => event.aggregateId === walletId)).toHaveLength(4);
+  });
+});
+
+describe("publicação duplicada continua segura para o consumidor (passo 5 do cenário da outbox)", () => {
+  // O publisher publica e morre antes do commit, e a nova tentativa só acontece depois da janela de
+  // 5 minutos de deduplicação do FIFO: a fila aceita a cópia como mensagem nova. Para não esperar os
+  // 5 minutos, a segunda publicação usa outro MessageDeduplicationId; o corpo (e o eventId) é o mesmo.
+  function crashThenRepublishAfterDedupWindow() {
+    let calls = 0;
+    return (real: EventPublisher): EventPublisher => ({
+      async publishBatch(messages: OutboxMessage[]) {
+        calls = calls + 1;
+        if (calls === 1) {
+          await real.publishBatch(messages);
+          throw new Error("processo morreu depois de publicar e antes do commit (injetado)");
+        }
+        await testSqsClient().send(new SendMessageBatchCommand({
+          QueueUrl: await queueUrl(queues.eventsQueueName),
+          Entries: messages.map((message) => ({ Id: message.id, MessageBody: JSON.stringify(message.payload), MessageGroupId: message.aggregateId, MessageDeduplicationId: `${message.id}-depois-da-janela` })),
+        }));
+        return { publishedIds: messages.map((message) => message.id), failures: [] };
+      },
+    });
+  }
+
+  test("cada evento chega duas vezes de verdade na fila, e o consumidor de exemplo aplica uma vez só pelo eventId", async () => {
+    await publishEverything(writerApp);
+    await drainQueue(queues.eventsQueueName, 300);
+    const { walletId, playerId } = await createWallet(writerApp.baseUrl, "100.00");
+    touchedWallets.push(walletId);
+    await submitWager(writerApp.baseUrl, { walletId, playerId, kind: "BET", amount: "30.00" });
+    await submitWager(writerApp.baseUrl, { walletId, playerId, kind: "WIN", amount: "12.50" });   // 6 eventos: 2 da abertura e 2 de cada operação
+    expect(await unpublishedCount()).toBe(6);
+
+    const republishing = await startInProcessApp(testConfig(queues, NO_BACKGROUND), { eventPublisher: crashThenRepublishAfterDedupWindow() }, { background: false });
+    offloadedApps.push(republishing);
+    await expect(republishing.application.outboxPublisher.publishOnce()).rejects.toThrow("antes do commit");
+    expect(await unpublishedCount()).toBe(6);                                                   // published_at não foi gravado
+    await publishEverything(republishing);                                                      // republica os mesmos eventos
+    expect(await unpublishedCount()).toBe(0);
+
+    await createExampleConsumerTables();
+    const stats = await consumeEventsUntilIdle(queues.eventsQueueName);
+    expect(stats).toEqual({ received: 12, applied: 6, duplicates: 6 });                         // a fila entregou as cópias; o consumidor ignorou todas
+    const [ledger] = await testSql()`select sum(amount)::text as moved from wallet_ledger_entries where wallet_id = ${walletId}`;
+    expect(await movedTotal(walletId)).toBe(ledger.moved);                                       // 100.00 + 30.00 + 12.50, uma vez cada
+    expect(ledger.moved).toBe("142.50");
   });
 });
