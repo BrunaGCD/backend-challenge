@@ -12,7 +12,7 @@ import type { Wallet } from "../domain/wallet";
 import { settleWagerTransaction, type SettlementOutcome } from "../domain/wager-settlement";   // regras de negócio
 import { WagerTransaction, WagerTransactionStatus } from "../domain/wager-transaction";
 import { logger, errorSummary } from "../observability/logger";                                 // logs sem valores
-import { addToLogContext } from "../observability/log-context";                                 // ids no contexto
+import { addToLogContext, runWithLogContext } from "../observability/log-context";              // ids no contexto
 import { concurrencyConflictsTotal, duplicatesTotal, idempotencyConflictsTotal, processingDurationSeconds, retriesTotal, transactionsTotal } from "../observability/metrics";
 import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, WalletNotFoundError } from "./errors";
 import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "./infrastructure-errors";
@@ -128,6 +128,10 @@ export class ProcessWagerTransaction {
   // ====================================================================================================
   // Devolve false quando não havia pendente vencida. Ordem de locks: linha da pendente, depois wallet.
   async processNextDuePending(): Promise<boolean> {
+    return runWithLogContext({}, () => this.processNextDuePendingInContext());                   // o laço de fundo não tem contexto de log próprio
+  }
+
+  private async processNextDuePendingInContext(): Promise<boolean> {
     let pendingId: string | undefined;
     const startedAt = performance.now();
     try {
@@ -224,6 +228,7 @@ export class ProcessWagerTransaction {
       return;
     }
     const { transaction } = result;
+    addToLogContext({ transactionId: transaction.id, walletId: transaction.walletId, providerId: transaction.providerId });   // vale também para o replay achado sob lock
     const outcomeLabel = result.idempotentReplay ? "replay" : transaction.status.toLowerCase();
     if (result.idempotentReplay) duplicatesTotal.inc({ source: "idempotency_key" });
     else transactionsTotal.inc({ kind: transaction.kind, status: transaction.status, channel: context.channel });
