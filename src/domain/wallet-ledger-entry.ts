@@ -45,7 +45,7 @@ export class WalletLedgerEntry {
     if (!Number.isInteger(props.walletVersion) || props.walletVersion < 1) throw new InvalidLedgerEntryError(`wallet_version inválido: ${props.walletVersion}`);
     const entry = WalletLedgerEntry.rehydrate(props);                                           // monta e só depois confere a conta
     if (!entry.isBalanced()) {
-      throw new InvalidLedgerEntryError(`lançamento não fecha: ${props.balanceBefore} ${props.direction} ${props.money} != ${props.balanceAfter}`);
+      throw new InvalidLedgerEntryError("lançamento não fecha: o saldo depois não é o de antes com o valor aplicado, ou as moedas diferem");   // sem valores: a mensagem pode chegar a um log
     }
     return entry;
   }

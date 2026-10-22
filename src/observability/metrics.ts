@@ -25,3 +25,14 @@ export const processingDurationSeconds = new Histogram({ name: "wagering_process
 export const reconciliationDivergencesTotal = new Counter({ name: "wagering_reconciliation_divergences_total", help: "Reconciliações que encontraram saldo diferente do ledger", registers });
 export const pendingReferenceGauge = new Gauge({ name: "wagering_pending_reference", help: "Transações em PENDING_REFERENCE", registers });
 export const inboxPayloadConflictsTotal = new Counter({ name: "wagering_inbox_payload_conflicts_total", help: "Mesmo messageId com conteúdo diferente", registers });
+
+// ----------------------------------------------------------------------------------------------------
+//                     CONTADORES DE POUCOS LABELS COMEÇAM EM ZERO, DESDE A SUBIDA
+// ----------------------------------------------------------------------------------------------------
+// Sem isso, a série só aparece no /metrics depois do primeiro incremento, e some de novo a cada reinício.
+// transactions_total e dlq_forwarded_total ficam de fora: combinações demais para listar à mão.
+for (const source of ["idempotency_key", "inbox"]) duplicatesTotal.inc({ source }, 0);                                      // replay pela key e mensagem já vista
+for (const component of ["sqs_consumer", "pending_reference", "outbox"]) retriesTotal.inc({ component }, 0);               // os três que reagendam trabalho
+for (const type of ["lock_timeout", "deadlock", "unique_violation", "optimistic_lock"]) concurrencyConflictsTotal.inc({ type }, 0);   // os tipos de ConcurrencyConflictType
+for (const type of ["idempotency_key", "external_transaction_id"]) idempotencyConflictsTotal.inc({ type }, 0);              // key repetida e id externo repetido
+consumerPausesTotal.inc({ reason: "database_unavailable" }, 0);                                                              // o único motivo de pausa

@@ -92,6 +92,10 @@ describe("WalletLedgerEntry", () => {
     expect(() => WalletLedgerEntry.create({ ...base, direction: LedgerDirection.Credit })).toThrow(InvalidLedgerEntryError);
   });
 
+  test("a mensagem da conta que não fecha não leva valores, porque pode chegar a um log", () => {
+    expect(() => WalletLedgerEntry.create({ ...base, balanceAfter: brl("41.00") })).toThrow(/^lançamento não fecha: [^0-9]*$/);
+  });
+
   test("create recusa valor zero, saldo negativo e versão inválida", () => {
     expect(() => WalletLedgerEntry.create({ ...base, money: brl("0.00"), balanceAfter: brl("50.00") })).toThrow(InvalidLedgerEntryError);
     expect(() => WalletLedgerEntry.create({ ...base, money: brl("60.00"), balanceAfter: brl("50.00").subtract(brl("60.00")) })).toThrow(InvalidLedgerEntryError);
