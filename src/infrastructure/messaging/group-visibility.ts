@@ -8,6 +8,8 @@
 //   a qualquer momento em que o grupo está em mãos, se sobra menos de um terço do prazo, porque a conta
 //   do "cabe mais uma" é uma estimativa (não inclui a espera por conexão do pool, os vários comandos da
 //   transação nem o DeleteMessage) e porque uma mensagem pode estar esperando a próxima tentativa.
+// O vigia tem um teto por mensagem: passado o tempo em mãos que nenhuma mensagem leva sem estar travada
+// (uma chamada que nunca volta), ele para de estender, e o prazo vence e devolve a mensagem para a fila.
 import { errorSummary, logger } from "../../observability/logger";
 import type { InputQueue, ReceivedMessage } from "./sqs";
 
@@ -16,15 +18,19 @@ export class GroupVisibility {
   private readonly unfinished: ReceivedMessage[];                                               // a mensagem atual e as seguintes do grupo
   private extensionInProgress: Promise<boolean> | undefined;
   private watchTimer: ReturnType<typeof setInterval> | undefined;
+  private currentMessageSince: number;                                                          // desde quando a mensagem da frente está em mãos: o recebimento, ou o fim da anterior
+  private inHandsLimitLogged = false;                                                           // um log por mensagem travada, não um a cada conferência
 
   constructor(
     private readonly queue: InputQueue,
     messages: ReceivedMessage[],
     receivedAt: number,
     private readonly visibilityMilliseconds: number,
+    private readonly inHandsLimitMilliseconds: number,                                          // o teto de tempo em mãos de cada mensagem
   ) {
     this.visibilityStartedAt = receivedAt;
     this.unfinished = [...messages];
+    this.currentMessageSince = receivedAt;
   }
 
   hasLeft(milliseconds: number): boolean {
@@ -32,10 +38,11 @@ export class GroupVisibility {
     return this.visibilityMilliseconds - elapsedMilliseconds >= milliseconds;
   }
 
-  // confere a cada sexto do prazo; estende quando sobra menos de um terço
+  // confere a cada sexto do prazo; estende quando sobra menos de um terço, até o teto da mensagem da frente
   startWatching(): void {
     const minimumLeftMilliseconds = this.visibilityMilliseconds / 3;
     this.watchTimer = setInterval(() => {
+      if (this.passedInHandsLimit()) return;                                                    // travada: o prazo vence e ela volta para a fila
       if (!this.hasLeft(minimumLeftMilliseconds)) void this.extend();                          // a falha já sai no log; tenta de novo na próxima conferência
     }, this.visibilityMilliseconds / 6);
   }
@@ -47,6 +54,8 @@ export class GroupVisibility {
   finish(message: ReceivedMessage): void {
     const index = this.unfinished.indexOf(message);
     if (index >= 0) this.unfinished.splice(index, 1);                                           // terminada: o prazo dela não interessa mais
+    this.currentMessageSince = performance.now();                                               // a seguinte começa a contar o próprio teto
+    this.inHandsLimitLogged = false;
   }
 
   // uma extensão por vez: quem pede enquanto outra está em andamento espera a mesma
@@ -69,6 +78,17 @@ export class GroupVisibility {
       }
     }
     if (released > 0) logger.info({ event: "sqs_messages_released", released }, "mensagens do grupo devolvidas para a fila com visibilidade 0 (cada uma gasta um recebimento)");
+  }
+
+  private passedInHandsLimit(): boolean {
+    const inHandsMilliseconds = performance.now() - this.currentMessageSince;                   // quanto a mensagem da frente já está em mãos
+    if (inHandsMilliseconds < this.inHandsLimitMilliseconds) return false;
+    if (!this.inHandsLimitLogged) {
+      this.inHandsLimitLogged = true;
+      const stuckMessage = this.unfinished[0];
+      logger.error({ event: "sqs_message_in_hands_limit_reached", sqsMessageId: stuckMessage?.sqsMessageId, groupId: stuckMessage?.groupId, inHandsMilliseconds: Math.round(inHandsMilliseconds), limitMilliseconds: this.inHandsLimitMilliseconds, unfinished: this.unfinished.length }, "a mensagem passou do teto de tempo em mãos sem terminar; o prazo deixa de ser estendido, e ela e as seguintes do grupo voltam para a fila quando ele vencer (cada uma gasta um recebimento)");
+    }
+    return true;
   }
 
   private async extendUnfinished(): Promise<boolean> {

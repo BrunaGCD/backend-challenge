@@ -20,6 +20,8 @@ const touchedWallets: string[] = [];
 const transientFailuresLeftByWallet = new Map<string, number>();                               // walletId -> quantas falhas ainda injetar
 const slowLockByWallet = new Map<string, number>();                                            // walletId -> quanto a tentativa demora antes do lock
 const lockAttemptsByWallet = new Map<string, number>();
+const neverEndingReplayReads = new Set<string>();                                              // idempotencyKey cuja leitura de replay nunca termina
+let hangingReplayReads = 0;                                                                     // quantas dessas leituras já começaram
 
 function withTransientFailures(real: Repositories): Repositories {
   return {
@@ -39,6 +41,29 @@ function withTransientFailures(real: Repositories): Repositories {
         const slowMilliseconds = slowLockByWallet.get(walletId) ?? 0;
         if (slowMilliseconds > 0) await Bun.sleep(slowMilliseconds);                            // processamento mais longo que a estimativa
         return real.wallets.findByIdForUpdate(walletId);
+      },
+    },
+  };
+}
+
+// a leitura de replay é a primeira chamada ao banco, fora da transação; pendurada, a mensagem não termina nunca
+function withHangingReplayRead(real: Repositories): Repositories {
+  const transactions = real.transactions;
+  return {
+    ...real,
+    transactions: {
+      findById: (transactionId) => transactions.findById(transactionId),
+      findByIdForUpdate: (transactionId) => transactions.findByIdForUpdate(transactionId),
+      findByProviderAndExternalId: (providerId, externalTransactionId) => transactions.findByProviderAndExternalId(providerId, externalTransactionId),
+      hasProcessedReversal: (referenceTransactionId) => transactions.hasProcessedReversal(referenceTransactionId),
+      lockNextDuePending: (now) => transactions.lockNextDuePending(now),
+      countPending: () => transactions.countPending(),
+      insert: (transaction) => transactions.insert(transaction),
+      updateDecision: (transaction) => transactions.updateDecision(transaction),
+      findByIdempotencyKey: async (idempotencyKey) => {
+        if (!neverEndingReplayReads.has(idempotencyKey)) return transactions.findByIdempotencyKey(idempotencyKey);
+        hangingReplayReads = hangingReplayReads + 1;
+        return new Promise<never>(() => {});                                                    // como uma consulta numa conexão pendurada: sem resposta e sem erro
       },
     },
   };
@@ -404,6 +429,43 @@ describe("fila", () => {
     expect(receiveCountsOf(record, stuckMessage.messageId)).toEqual([1]);
     expect(receiveCountsOf(record, freeMessage.messageId)).toEqual([1]);
     expect(await drainQueue(ownQueues.deadLetterQueueName, 300)).toHaveLength(0);
+  });
+
+  // Com o orçamento de 1 s, a espera de 2,5 s e a visibilidade de 3 s dos testes, o teto de tempo em mãos
+  // é de 1 + 2,5 + (2,5 + 3) = 9 s. Sem ele, o vigia estenderia o prazo até a instância reiniciar.
+  test("chamada que nunca termina: passado o teto de tempo em mãos, o prazo deixa de ser estendido, a mensagem volta para a fila e outra instância a processa", async () => {
+    const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
+    touchedWallets.push(walletId);
+    const hangQueues = await createTestQueues("hang");                                         // fila própria: o consumidor do arquivo não pega esta
+    const stuckRecord = newQueueRecord();
+    const otherRecord = newQueueRecord();
+    const settings = { CONSUMER_RETRY_BUDGET_MS: "1000", SHUTDOWN_IN_FLIGHT_TIMEOUT_MS: "1000", OUTBOX_PUBLISHER_ENABLED: "false", PENDING_WORKER_ENABLED: "false" };
+    const stuckSettings = { ...settings, CONSUMER_MAX_IN_FLIGHT_MESSAGES: "1" };               // a vaga fica com a pendurada: esta instância não busca a mensagem de volta
+    const inHandsLimitMilliseconds = 1_000 + 2_500 + 2_500 + 3_000;
+    const message = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "BET", amount: "3.00" });
+    neverEndingReplayReads.add(message.data.idempotencyKey);
+    const hangingBefore = hangingReplayReads;
+
+    const stuckApp = await startInProcessApp(testConfig(hangQueues, stuckSettings), { repositories: withHangingReplayRead, inputQueue: recordingQueue(stuckRecord) });
+    await sendWagerMessage(hangQueues.inputQueueName, message);
+    await waitUntil("a leitura de replay pendurada", () => hangingReplayReads > hangingBefore);
+    const otherApp = await startInProcessApp(testConfig(hangQueues, settings), { inputQueue: recordingQueue(otherRecord) });   // a outra instância, sem nada pendurado
+    await waitUntil("processada pela outra instância", async () => (await transactionRows(message.data.externalTransactionId)).length > 0 && (await queueIsEmpty(hangQueues.inputQueueName)), 30_000);
+    await otherApp.stop();
+    await stuckApp.stop();                                                                      // a mensagem pendurada não termina: o desligamento desiste depois de 1 s
+
+    const firstReceiveAt = stuckRecord.receives.find((batch) => batch.messages.some((received) => received.messageId === message.messageId))!.at;
+    const secondReceiveAt = otherRecord.receives.find((batch) => batch.messages.some((received) => received.messageId === message.messageId))!.at;
+    const extensions = stuckRecord.visibilityChanges.filter((change) => change.messageId === message.messageId && change.seconds === 3);
+    expect(extensions.length).toBeGreaterThanOrEqual(2);                                        // estendida enquanto estava dentro do teto
+    expect(extensions.at(-1)!.at - firstReceiveAt).toBeLessThan(inHandsLimitMilliseconds);     // nenhuma extensão depois do teto
+    expect(secondReceiveAt - firstReceiveAt).toBeGreaterThanOrEqual(inHandsLimitMilliseconds); // só voltou depois do teto, não no primeiro prazo de 3 s
+    expect(releasesOf(stuckRecord, message.messageId)).toBe(0);                                 // não foi devolvida: voltou porque o prazo venceu
+    expect(receiveCountsOf(stuckRecord, message.messageId)).toEqual([1]);
+    expect(receiveCountsOf(otherRecord, message.messageId)).toEqual([2]);                       // a volta pelo prazo gasta um recebimento, o certo para uma chamada travada
+    const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id = ${message.data.externalTransactionId} and status = 'PROCESSED'`;
+    expect(counts.total).toBe(1);
+    expect(await drainQueue(hangQueues.deadLetterQueueName, 300)).toHaveLength(0);
   });
 
   test("a métrica de DLQ lê o tamanho da fila, inclusive o que o SQS moveu", async () => {

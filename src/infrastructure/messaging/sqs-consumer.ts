@@ -190,7 +190,7 @@ export class SqsConsumer {
   // falha: devolver as seguintes gastaria um recebimento delas sem elas terem sido tentadas.
   private async processGroup(group: ReceivedMessage[], receivedAt: number): Promise<void> {
     let messagesLeft = group.length;                                                            // as do grupo que ainda estão em mãos
-    const visibility = new GroupVisibility(this.queue, group, receivedAt, this.settings.visibilityTimeoutMilliseconds);
+    const visibility = new GroupVisibility(this.queue, group, receivedAt, this.settings.visibilityTimeoutMilliseconds, this.inHandsLimitMilliseconds());
     visibility.startWatching();                                                                 // estende sozinho se o processamento ou a espera passar do estimado
     try {
       for (const message of group) {
@@ -218,6 +218,16 @@ export class SqsConsumer {
       visibility.stopWatching();
       this.markOutOfHands(messagesLeft);                                                        // as devolvidas também saíram das mãos
     }
+  }
+
+  // O teto de tempo em mãos de uma mensagem: o orçamento de tentativas, mais a espera máxima da fila (a
+  // tentativa final, que começa no fim do orçamento), mais uma folga de outra espera máxima (a primeira
+  // tentativa, antes de o orçamento começar a contar) e de um prazo de visibilidade (as chamadas ao SQS
+  // do fim). Uma mensagem que não terminou nesse tempo está presa numa chamada que não volta.
+  private inHandsLimitMilliseconds(): number {
+    const longestMessageMilliseconds = this.settings.longestMessageMilliseconds;                // o statement_timeout da fila
+    const marginMilliseconds = longestMessageMilliseconds + this.settings.visibilityTimeoutMilliseconds;   // 15 s + 30 s em produção
+    return this.settings.retryBudgetMilliseconds + longestMessageMilliseconds + marginMilliseconds;        // 6 minutos em produção
   }
 
   // Uma busca aberta pegaria a mensagem assim que ela voltasse, e isso gastaria mais um recebimento
