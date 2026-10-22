@@ -80,7 +80,7 @@ Os outros endpoints:
 | `GET /health/live` e `GET /health/ready` | liveness e readiness (banco e fila) |
 | `GET /metrics` | métricas no formato do Prometheus |
 
-Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo (o formato da mensagem está no ARCHITECTURE.md). Os eventos publicados saem em `wagering-events.fifo`. Para mandar uma operação pela fila sem escrever código, há um script que monta a mensagem nesse formato e roda pelo container de testes (que já tem o endereço do MiniStack):
+Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo (o corpo segue o formato da seção 10 do desafio, e o contrato da fila está no ARCHITECTURE.md, §13). Os eventos publicados saem em `wagering-events.fifo`. Para mandar uma operação pela fila sem escrever código, há um script que monta a mensagem nesse formato e roda pelo container de testes (que já tem o endereço do MiniStack):
 
 ```sh
 docker compose run --rm --no-deps tests bun scripts/send-wager-message.ts \
