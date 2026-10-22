@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import type { Repositories } from "../../src/application/ports";
 import type { InputQueue } from "../../src/infrastructure/messaging/sqs";                       // a fila de entrada, embrulhada para anotar recebimentos e devoluções
-import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, sendWagerMessage, startInProcessApp, submitWager, testConfig, testSql, testSqsClient, wagerMessage, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
+import { createTestQueues, createWallet, drainQueue, holdWalletLock, httpRequest, queueUrl, sendWagerMessage, startInProcessApp, submitWager, testConfig, testSql, testSqsClient, wagerMessage, waitUntil, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";
 import { newQueueRecord, receiveCountsOf, recordingQueue, releasesOf, type QueueRecord } from "../support/recording-queue";
 
@@ -82,20 +82,6 @@ async function queueIsEmpty(queueName: string): Promise<boolean> {
 
 async function transactionRows(externalTransactionId: string) {
   return testSql()`select status from wager_transactions where external_transaction_id = ${externalTransactionId}`;
-}
-
-// segura o lock da wallet numa transação por fora, até o teste soltar
-async function holdWalletLock(walletId: string): Promise<{ release: () => Promise<void> }> {
-  let releaseLock: () => void = () => {};
-  let lockHeld: () => void = () => {};
-  const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
-  const holder = testSql().begin(async (transaction) => {
-    await transaction`select id from wallets where id = ${walletId} for update`;
-    lockHeld();
-    await new Promise<void>((resolve) => { releaseLock = resolve; });
-  });
-  await lockHeldPromise;
-  return { release: async () => { releaseLock(); await holder; } };
 }
 
 // o waitUntil dos testes da wallet presa: se a espera estourar, imprime o que já foi anotado, para a falha vir com diagnóstico

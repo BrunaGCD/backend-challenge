@@ -124,6 +124,20 @@ export function testSql(): SQL {
   return sharedSql;
 }
 
+// segura o lock da wallet numa transação por fora, até o teste soltar: quem tentar travar a wallet espera
+export async function holdWalletLock(walletId: string): Promise<{ release: () => Promise<void> }> {
+  let releaseLock: () => void = () => {};
+  let lockHeld: () => void = () => {};
+  const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
+  const holder = testSql().begin(async (transaction) => {
+    await transaction`select id from wallets where id = ${walletId} for update`;
+    lockHeld();
+    await new Promise<void>((resolve) => { releaseLock = resolve; });
+  });
+  await lockHeldPromise;
+  return { release: async () => { releaseLock(); await holder; } };
+}
+
 // ----------------------------------------------------------------------------------------------------
 //                                    APLICAÇÃO NO MESMO PROCESSO
 // ----------------------------------------------------------------------------------------------------

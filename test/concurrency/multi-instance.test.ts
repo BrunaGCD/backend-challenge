@@ -4,7 +4,7 @@
 // Cenários 1, 2, 3, 4, 6 e 7 da seção 13. Paralelismo real (processos separados), nada de mock.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
-import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitLikeProvider, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type ProviderRetryCounter, type TestQueues, type WagerInput } from "../support/harness";
+import { createTestQueues, createWallet, drainQueue, holdWalletLock, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitLikeProvider, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type ProviderRetryCounter, type TestQueues, type WagerInput } from "../support/harness";
 import { instanceLogLines, spawnInstance, stopInstance, type Instance } from "../support/instances";
 import { expectWalletInvariants } from "../support/invariants";
 
@@ -32,20 +32,6 @@ async function newWallet(initialBalance: string) {
 async function inputQueueIsEmpty(): Promise<boolean> {
   const response = await testSqsClient().send(new GetQueueAttributesCommand({ QueueUrl: await queueUrl(queues.inputQueueName), AttributeNames: ["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"] }));
   return Number(response.Attributes?.ApproximateNumberOfMessages) === 0 && Number(response.Attributes?.ApproximateNumberOfMessagesNotVisible) === 0;
-}
-
-// segura o lock da wallet numa transação por fora, até o teste soltar (a mesma técnica do retry-and-dlq.test.ts)
-async function holdWalletLock(walletId: string): Promise<{ release: () => Promise<void> }> {
-  let releaseLock: () => void = () => {};
-  let lockHeld: () => void = () => {};
-  const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
-  const holder = testSql().begin(async (transaction) => {
-    await transaction`select id from wallets where id = ${walletId} for update`;
-    lockHeld();
-    await new Promise<void>((resolve) => { releaseLock = resolve; });
-  });
-  await lockHeldPromise;
-  return { release: async () => { releaseLock(); await holder; } };
 }
 
 // sessões deste banco paradas esperando um lock num SELECT ... FOR UPDATE (as instâncias esperando a wallet)
