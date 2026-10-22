@@ -36,7 +36,7 @@ A garantia final de cada invariante está no banco, porque com várias instânci
 
 ## 2. Experimentos antes da implementação
 
-Antes de escrever o código, deixei duas escolhas condicionadas a experimento, com o critério de cada uma definido antes de rodar (nas minhas instruções de trabalho, §19). Os roteiros estão em [experiments/](experiments/) e rodaram antes de qualquer código do projeto.
+Antes de escrever o código, deixei duas escolhas condicionadas a experimento, com o critério de cada uma definido antes de rodar. Os roteiros estão em [experiments/](experiments/) e rodaram antes de qualquer código do projeto.
 
 ### E1: a stack no Bun (decide o ORM, o desligamento, logs, métricas e os testes com várias instâncias)
 

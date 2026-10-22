@@ -4,7 +4,7 @@
 // As mensagens de um grupo (wallet) ficam com o consumidor do recebimento até a última terminar. Estender
 // o prazo não faz o SQS entregar a mensagem de novo, então não gasta recebimento; devolver com
 // visibilidade 0, ou deixar o prazo vencer, gasta. O prazo é estendido em dois momentos:
-//   antes de começar cada mensagem, se não cabe mais uma espera inteira no que sobrou (R4-B);
+//   antes de começar cada mensagem, se não cabe mais uma espera inteira no que sobrou;
 //   a qualquer momento em que o grupo está em mãos, se sobra menos de um terço do prazo, porque a conta
 //   do "cabe mais uma" é uma estimativa (não inclui a espera por conexão do pool, os vários comandos da
 //   transação nem o DeleteMessage) e porque uma mensagem pode estar esperando a próxima tentativa.
