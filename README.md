@@ -89,7 +89,7 @@ Ele imprime a mensagem enviada e o caminho para consultar o resultado (`GET /pro
 
 ## Rodar os testes
 
-Os testes de integração e de concorrência usam o PostgreSQL e o MiniStack de verdade, do próprio compose, e cada execução cria um banco novo (`wagering_test_<data>_<pid>`), porque os triggers do ledger impedem apagar lançamentos para limpar as tabelas.
+Os testes de integração e de concorrência usam o PostgreSQL e o MiniStack de verdade, do próprio compose, e cada execução cria um banco novo (`wagering_test_<data>_<pid>_<sufixo aleatório>`), porque os triggers do ledger impedem apagar lançamentos para limpar as tabelas.
 
 ### Dentro do Docker (o caminho que funciona igual em qualquer sistema)
 
