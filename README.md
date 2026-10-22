@@ -116,6 +116,8 @@ No Windows, o teste de desligamento gracioso (`SIGTERM`) é pulado, porque o Win
 
 Também há `bun run typecheck` (TypeScript estrito) e `bun run lint` (inclusive a regra que impede o domínio e a aplicação de importar NestJS, MikroORM ou a infraestrutura).
 
+Para simular o SQS fora do ar no compose, tire o MiniStack da rede em vez de pará-lo, porque ele guarda as filas só em memória e um `docker compose stop ministack` as apaga: `docker network disconnect backend-challenge-main_default backend-challenge-main-ministack-1` derruba, e `docker network connect --alias ministack backend-challenge-main_default backend-challenge-main-ministack-1` traz de volta, com o nome `ministack` que as instâncias usam (os nomes da rede e do container vêm da pasta do projeto; `docker network ls` e `docker compose ps` mostram os seus).
+
 ## Configuração
 
 Todos os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, com um valor inicial escolhido como padrão. A lista está em [.env.example](.env.example); o Bun lê um `.env` automaticamente se você copiar o exemplo. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
