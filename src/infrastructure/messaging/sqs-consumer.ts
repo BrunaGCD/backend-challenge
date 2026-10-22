@@ -13,7 +13,7 @@
 import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, ValidationError, WalletNotFoundError, type ApplicationError, type FieldError } from "../../application/errors";
 import { isDatabaseUnavailableError } from "../../application/infrastructure-errors";            // banco fora ou sem conexão livre
 import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
-import { isPlainObject, isValidCorrelationId, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields } from "../../application/wager-command";
+import { isPlainObject, isValidCorrelationId, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields, type WagerCommand } from "../../application/wager-command";
 import { fullJitterDelayMilliseconds, type RetryPolicy } from "../../domain/backoff";          // backoff comum
 import { runWithLogContext } from "../../observability/log-context";
 import { errorSummary, logger } from "../../observability/logger";
@@ -45,6 +45,7 @@ const MESSAGE_ID_PATTERN = /^[\x21-\x7E]{1,128}$/;
 const MAX_MESSAGES_PER_RECEIVE = 10;
 const WAIT_SECONDS_WITH_GROUPS_IN_HANDS = 1;                                                    // busca curta com grupos em mãos: no desligamento ela termina sozinha, sem cancelar
 const RETRY_BUDGET_EXHAUSTED = "RETRY_BUDGET_EXHAUSTED";                                        // reason na DLQ: transitório que não passou dentro do orçamento
+const RECEIVE_FAILURE_MAX_EXPONENT = 5;                                                         // falhas seguidas da busca: com o padrão, 2 s × 2^5 já passa do teto de 60 s
 
 class PermanentMessageError extends Error {
   constructor(public readonly reason: string, message: string) {
@@ -55,7 +56,7 @@ class PermanentMessageError extends Error {
 interface ParsedMessage {
   messageId: string;
   idempotencyKey: string;
-  command: NonNullable<Extract<ReturnType<typeof parseWagerCommand>, { ok: true }>["value"]>;
+  command: WagerCommand;                                                                        // o mesmo comando validado do HTTP
 }
 
 export class SqsConsumer {
@@ -120,7 +121,7 @@ export class SqsConsumer {
       } catch (error) {
         if (this.stopping) break;                                                               // abortado pelo desligamento
         consecutiveReceiveFailures = consecutiveReceiveFailures + 1;
-        const waitMilliseconds = fullJitterDelayMilliseconds(Math.min(consecutiveReceiveFailures, 5), this.settings.retryPolicy);
+        const waitMilliseconds = fullJitterDelayMilliseconds(Math.min(consecutiveReceiveFailures, RECEIVE_FAILURE_MAX_EXPONENT), this.settings.retryPolicy);
         logger.warn({ event: "sqs_receive_failed", attempt: consecutiveReceiveFailures, ...errorSummary(error) }, "falha ao receber da fila; tentando de novo");
         await this.sleepUnlessStopping(waitMilliseconds);
         continue;
