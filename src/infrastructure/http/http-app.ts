@@ -5,6 +5,7 @@ import "reflect-metadata";                                                      
 import { Inject, Injectable, Module, type BeforeApplicationShutdown, type INestApplication, type LoggerService, type OnApplicationShutdown } from "@nestjs/common";
 import { APP_GUARD, NestFactory, Reflector } from "@nestjs/core";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { isValidCorrelationId } from "../../application/wager-command";                         // o mesmo formato aceito na fila
 import { stopBackgroundWork, type Application } from "../../composition";
 import { runWithLogContext } from "../../observability/log-context";
 import { logger } from "../../observability/logger";
@@ -12,7 +13,6 @@ import { AuthGuard, NoopProviderIdentity } from "./auth";
 import { ACCEPTED_CURRENCIES, CHECK_READINESS, CREATE_WALLET, HealthController, PROCESS_WAGER, WageringController, WALLET_QUERIES, WalletsController } from "./controllers";
 import { ProblemDetailsFilter, sendProblem } from "./problem-details";
 
-const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;                                      // até 128 caracteres seguros
 const APPLICATION = "APPLICATION";                                                              // só o ciclo de vida recebe a aplicação montada inteira
 
 // passos do SIGTERM (seção 10): readiness em 503, consumidor e laços param, HTTP fecha, pool fecha
@@ -43,7 +43,7 @@ class PinoNestLogger implements LoggerService {
 
 function correlationMiddleware(request: Request, response: Response, next: NextFunction): void {
   const header = request.header("x-correlation-id");
-  const correlationId = header && CORRELATION_ID_PATTERN.test(header) ? header : Bun.randomUUIDv7();
+  const correlationId = isValidCorrelationId(header) ? header : Bun.randomUUIDv7();
   (request as Request & { correlationId: string }).correlationId = correlationId;
   response.setHeader("X-Correlation-Id", correlationId);
   runWithLogContext({ correlationId }, () => next());                                           // tudo que vem depois herda o contexto

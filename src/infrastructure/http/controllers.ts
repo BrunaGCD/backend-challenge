@@ -5,7 +5,7 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { IdempotencyKeyMissingError, ValidationError, type FieldError } from "../../application/errors";
-import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, readMoney, readUuid, rejectUnknownFields } from "../../application/wager-command";
+import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, readMoney, readUuid, rejectUnknownFields, UUID_PATTERN } from "../../application/wager-command";
 import type { CreateWallet } from "../../application/create-wallet";
 import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
 import type { WalletQueries } from "../../application/queries";
@@ -23,8 +23,6 @@ export const ACCEPTED_CURRENCIES = "ACCEPTED_CURRENCIES";
 export const CHECK_READINESS = "CHECK_READINESS";
 
 type RequestWithContext = Request & { correlationId: string };
-
-const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function pathUuid(value: string, field: string): string {
   if (!UUID_PATTERN.test(value)) throw new ValidationError([{ field, message: "precisa ser um UUID" }]);

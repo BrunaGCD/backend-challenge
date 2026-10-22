@@ -13,7 +13,7 @@
 import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, ValidationError, WalletNotFoundError, type ApplicationError, type FieldError } from "../../application/errors";
 import { isDatabaseUnavailableError } from "../../application/infrastructure-errors";            // banco fora ou sem conexão livre
 import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
-import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields } from "../../application/wager-command";
+import { isPlainObject, isValidCorrelationId, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields } from "../../application/wager-command";
 import { fullJitterDelayMilliseconds, type RetryPolicy } from "../../domain/backoff";          // backoff comum
 import { runWithLogContext } from "../../observability/log-context";
 import { errorSummary, logger } from "../../observability/logger";
@@ -42,7 +42,6 @@ type Step = { kind: "process" } | { kind: "delete" } | { kind: "dead_letter"; re
 const MESSAGE_TYPE = "WagerTransactionRequested";
 const ENVELOPE_FIELDS = ["messageId", "type", "occurredAt", "data"];
 const MESSAGE_ID_PATTERN = /^[\x21-\x7E]{1,128}$/;
-const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MAX_MESSAGES_PER_RECEIVE = 10;
 const WAIT_SECONDS_WITH_GROUPS_IN_HANDS = 1;                                                    // busca curta com grupos em mãos: no desligamento ela termina sozinha, sem cancelar
 const RETRY_BUDGET_EXHAUSTED = "RETRY_BUDGET_EXHAUSTED";                                        // reason na DLQ: transitório que não passou dentro do orçamento
@@ -290,7 +289,7 @@ export class SqsConsumer {
 
   // uma passada pelo caso de uso: devolve o próximo passo, ou lança o erro transitório (nada foi gravado)
   private async processOnce(message: ReceivedMessage, parsed: ParsedMessage): Promise<Exclude<Step, { kind: "process" }>> {
-    const correlationId = message.correlationIdAttribute && CORRELATION_ID_PATTERN.test(message.correlationIdAttribute) ? message.correlationIdAttribute : parsed.messageId;
+    const correlationId = isValidCorrelationId(message.correlationIdAttribute) ? message.correlationIdAttribute : parsed.messageId;
     try {
       await this.processWager.execute(parsed.command, parsed.idempotencyKey, { channel: "sqs", correlationId, causationId: parsed.messageId, inbox: { consumerName: this.settings.consumerName, messageId: parsed.messageId } });
     } catch (error) {

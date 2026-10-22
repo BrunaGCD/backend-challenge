@@ -22,10 +22,11 @@ export interface WagerCommand {
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; errors: FieldError[] };
 
-const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;   // qualquer versão
+export const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;   // qualquer versão; os ids no caminho das rotas usam o mesmo
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const IDENTIFIER_MAX_LENGTH = 128;
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7E]{1,255}$/;                                         // ASCII visível, 1 a 255
+const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;                                      // até 128 caracteres seguros
 const RESERVED_PROVIDER_ID = "internal";
 const PROVIDER_KINDS = [WagerTransactionKind.Bet, WagerTransactionKind.Win, WagerTransactionKind.Loss, WagerTransactionKind.Refund, WagerTransactionKind.Rollback];
 const COMMAND_FIELDS = ["providerId", "externalTransactionId", "playerId", "walletId", "roundId", "gameId", "kind", "money", "referenceExternalTransactionId"];
@@ -36,6 +37,11 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export function isValidIdempotencyKey(value: unknown): value is string {
   return typeof value === "string" && IDEMPOTENCY_KEY_PATTERN.test(value);
+}
+
+// o header X-Correlation-Id do HTTP e o atributo correlationId da fila: fora do formato, nasce outro
+export function isValidCorrelationId(value: unknown): value is string {
+  return typeof value === "string" && CORRELATION_ID_PATTERN.test(value);
 }
 
 export function rejectUnknownFields(input: Record<string, unknown>, allowedFields: string[], prefix: string, errors: FieldError[]): void {
