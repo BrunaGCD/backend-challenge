@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitLikeProvider, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type HttpResult, type TestQueues, type WagerInput } from "../support/harness";
-import { spawnInstance, stopInstance, type Instance } from "../support/instances";
+import { instanceLogLines, spawnInstance, stopInstance, type Instance } from "../support/instances";
 import { expectWalletInvariants } from "../support/invariants";
 
 let queues: TestQueues;
@@ -17,10 +17,11 @@ let hotWalletId = "";
 // para o teste não demorar, e continua acima dos 15 s de statement_timeout da fila
 const PRODUCTION_LIKE_QUEUE = { visibilityTimeoutSeconds: 20, maxReceiveCount: 10, waitTimeSeconds: 1 };
 const PRODUCTION_LIKE_ENVIRONMENT = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "10", CONSUMER_RETRY_BUDGET_MS: "300000", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
+const POOL_THAT_FITS = { DATABASE_POOL_MAX: "5" };                                             // 4 hot wallets em paralelo são 12 instâncias: 60 conexões, abaixo das 100 do PostgreSQL
 
 beforeAll(async () => {
   queues = await createTestQueues("hot", PRODUCTION_LIKE_QUEUE);
-  const environment = testEnvironment(queues, { PENDING_REFERENCE_TTL_MS: "8000", ...PRODUCTION_LIKE_ENVIRONMENT });
+  const environment = testEnvironment(queues, { PENDING_REFERENCE_TTL_MS: "8000", ...PRODUCTION_LIKE_ENVIRONMENT, ...POOL_THAT_FITS });
   instances = await Promise.all(["hot-1", "hot-2", "hot-3"].map((name) => spawnInstance(name, environment)));
 });
 
@@ -77,7 +78,14 @@ test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet s�
   const responses = await Promise.all(httpResponses);
   await Promise.all(queueSends);
   console.log(`hot wallet: reenvios com a mesma key: ${retryCounter.serviceUnavailable} por 503 (lock_timeout), ${retryCounter.networkErrors} por conexão caída`);
-  expect(responses.every((response) => [200, 202, 422].includes(response.status))).toBe(true);
+  const unexpectedResponses = responses.filter((response) => ![200, 202, 422].includes(response.status));
+  if (unexpectedResponses.length > 0) {
+    console.log("hot wallet: respostas inesperadas:", JSON.stringify(unexpectedResponses.map((response) => ({ status: response.status, code: response.body?.code }))));
+    for (const instance of instances) {
+      for (const line of instanceLogLines(instance).filter((line) => Number(line.level) >= 50).slice(0, 5)) console.log(`hot wallet: erro em ${instance.name}:`, JSON.stringify(line));
+    }
+  }
+  expect(unexpectedResponses).toEqual([]);
 
   await waitUntil("fila consumida", async () => {
     const attributes = await testSqsClient().send(new GetQueueAttributesCommand({ QueueUrl: await queueUrl(queues.inputQueueName), AttributeNames: ["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"] }));

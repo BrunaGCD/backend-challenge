@@ -255,12 +255,13 @@ describe("fila", () => {
     expect(counts.total).toBe(1);
   });
 
-  // Visibilidade de 3 s e statement_timeout de 2,5 s nos testes: só cabe começar uma mensagem até 0,5 s
-  // depois do recebimento. A primeira do lote espera o lock por 1 s; as outras três já não cabem.
+  // Fila própria com visibilidade de 10 s e statement_timeout de 8 s (a mesma proporção dos 2,5 s em 3 s
+  // dos outros testes): só cabe começar uma mensagem até 2 s depois do recebimento. A primeira do lote
+  // espera o lock por 3 s; as outras três já não cabem, e a extensão tem uns 7 s de folga até o prazo vencer.
   test("lote da mesma wallet com a wallet travada por fora: o prazo das mensagens que não cabem mais é estendido, e as quatro são processadas no mesmo recebimento", async () => {
     const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
     touchedWallets.push(walletId);
-    const batchQueues = await createTestQueues("visibility");                                  // fila própria: o consumidor do arquivo não pega este lote
+    const batchQueues = await createTestQueues("visibility", { visibilityTimeoutSeconds: 10, maxReceiveCount: 3, waitTimeSeconds: 1 });   // fila própria: o consumidor do arquivo não pega este lote
     const messages = [1, 2, 3, 4].map(() => wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "BET", amount: "1.00" }));
     for (const message of messages) await sendWagerMessage(batchQueues.inputQueueName, message);   // todas na fila antes do consumidor ligar: vêm num lote só
 
@@ -280,10 +281,11 @@ describe("fila", () => {
       },
       sendToDeadLetter: (message, reason) => real.sendToDeadLetter(message, reason),
     });
-    const consumerApp = await startInProcessApp(testConfig(batchQueues, { OUTBOX_PUBLISHER_ENABLED: "false", PENDING_WORKER_ENABLED: "false" }), { inputQueue: recordingBatchQueue });
+    const tenSecondVisibility = { SQS_VISIBILITY_TIMEOUT_SECONDS: "10", DATABASE_BACKGROUND_LOCK_TIMEOUT: "6s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "8s", OUTBOX_PUBLISHER_ENABLED: "false", PENDING_WORKER_ENABLED: "false" };
+    const consumerApp = await startInProcessApp(testConfig(batchQueues, tenSecondVisibility), { inputQueue: recordingBatchQueue });
 
     await waitUntil("o primeiro lote chegar", () => receives.length > 0);
-    await Bun.sleep(1_000);                                                                     // a primeira espera o lock; o prazo das outras se esgota
+    await Bun.sleep(3_000);                                                                     // a primeira espera o lock; o prazo das outras se esgota
     await lock.release();
 
     const externalIds = messages.map((message) => message.data.externalTransactionId);
@@ -299,10 +301,10 @@ describe("fila", () => {
     const receiveCounts = receives.flatMap((batch) => batch.messages).filter((message) => batchIds.includes(message.id)).map((message) => message.receiveCount);
     expect(receiveCounts).toEqual([1, 1, 1, 1]);                                                // nenhuma recebida de novo: nenhum recebimento gasto
     expect(visibilityChanges.filter((change) => change.seconds === 0)).toHaveLength(0);         // nenhuma devolvida
-    const extensions = visibilityChanges.filter((change) => change.seconds === 3);              // prazo cheio da fila de teste
+    const extensions = visibilityChanges.filter((change) => change.seconds === 10);             // prazo cheio desta fila
     expect(extensions.length).toBeGreaterThanOrEqual(1);
     expect(extensions.slice(0, 3).map((change) => change.id)).toEqual(batchIds.slice(1));       // a primeira extensão cobre as três que não tinham começado
-    expect(extensions[0]!.at - firstBatch.at).toBeLessThan(3_000);                              // antes de a visibilidade vencer sozinha
+    expect(extensions[0]!.at - firstBatch.at).toBeLessThan(10_000);                             // antes de a visibilidade vencer sozinha
     const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id in ${testSql()(externalIds)}`;
     expect(counts.total).toBe(4);                                                               // uma transação por mensagem
     const [wallet] = await testSql()`select balance from wallets where id = ${walletId}`;
