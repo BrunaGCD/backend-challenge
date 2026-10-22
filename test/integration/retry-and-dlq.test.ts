@@ -73,6 +73,29 @@ async function holdWalletLock(walletId: string): Promise<{ release: () => Promis
   return { release: async () => { releaseLock(); await holder; } };
 }
 
+// Uma instância só, com fila própria e orçamento longo, e a wallet A travada por fora, com a mensagem
+// dela já tentando de novo: a primeira tentativa estourou o lock_timeout de 2 s dos testes.
+async function stuckWalletScenario(extra: Record<string, string> = {}) {
+  const stuck = await createWallet(app.baseUrl, "100.00");
+  const free = await createWallet(app.baseUrl, "100.00");
+  touchedWallets.push(stuck.walletId, free.walletId);
+  const ownQueues = await createTestQueues("inflight");                                         // fila própria: o consumidor do arquivo não pega estas
+  const record = newQueueRecord();
+  const settings = { CONSUMER_RETRY_BUDGET_MS: "60000", OUTBOX_PUBLISHER_ENABLED: "false", PENDING_WORKER_ENABLED: "false", ...extra };   // A não chega à DLQ durante o teste
+  const consumerApp = await startInProcessApp(testConfig(ownQueues, settings), { repositories: withTransientFailures, inputQueue: recordingQueue(record) });
+  const lock = await holdWalletLock(stuck.walletId);
+  const stuckMessage = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId: stuck.walletId, playerId: stuck.playerId, kind: "BET", amount: "1.00" });
+  await sendWagerMessage(ownQueues.inputQueueName, stuckMessage);
+  await waitUntil("a mensagem da wallet A tentando de novo", () => (lockAttemptsByWallet.get(stuck.walletId) ?? 0) >= 2, 15_000);   // a segunda tentativa já começou
+  const freeMessage = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId: free.walletId, playerId: free.playerId, kind: "BET", amount: "5.00" });
+  return { stuck, ownQueues, record, consumerApp, lock, stuckMessage, freeMessage };
+}
+
+async function processedCount(externalTransactionIds: string[]): Promise<number> {
+  const [row] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id in ${testSql()(externalTransactionIds)} and status = 'PROCESSED'`;
+  return row.total;
+}
+
 beforeAll(async () => {
   queues = await createTestQueues("retry");                                                     // visibilidade de 3 s nos testes
   app = await startInProcessApp(testConfig(queues, { DATABASE_LOCK_TIMEOUT: "500ms", CONSUMER_RETRY_BUDGET_MS: "4000" }), { repositories: withTransientFailures, inputQueue: recordingQueue(queueRecord) });
@@ -310,6 +333,63 @@ describe("fila", () => {
     const [wallet] = await testSql()`select balance from wallets where id = ${walletId}`;
     expect(wallet.balance).toBe("96.00");
     expect(await drainQueue(batchQueues.deadLetterQueueName, 300)).toHaveLength(0);
+  });
+
+  // Antes, a busca só saía de novo quando o lote inteiro terminava, então a mensagem de uma wallet presa,
+  // tentando de novo dentro do orçamento, segurava as mensagens de todas as outras wallets da instância.
+  test("uma wallet presa não segura as outras: com a mensagem da wallet A tentando de novo, a da wallet B, livre, vira transação em poucos segundos, e a seguinte de A só chega depois da primeira", async () => {
+    const { stuck, ownQueues, record, consumerApp, lock, stuckMessage, freeMessage } = await stuckWalletScenario();
+    const nextStuckMessage = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId: stuck.walletId, playerId: stuck.playerId, kind: "BET", amount: "2.00" });
+    let freeMilliseconds = Number.POSITIVE_INFINITY;
+    let stuckProcessedWhileLocked = -1;
+    let nextStuckReceivesWhileLocked = -1;
+    try {
+      await sendWagerMessage(ownQueues.inputQueueName, nextStuckMessage);                       // a seguinte de A: o FIFO não entrega com a primeira em mãos
+      const sentAt = performance.now();
+      await sendWagerMessage(ownQueues.inputQueueName, freeMessage);
+      await waitUntil("a mensagem da wallet B processada", async () => (await processedCount([freeMessage.data.externalTransactionId])) === 1, 15_000);
+      freeMilliseconds = performance.now() - sentAt;
+      stuckProcessedWhileLocked = await processedCount([stuckMessage.data.externalTransactionId]);
+      nextStuckReceivesWhileLocked = receiveCountsOf(record, nextStuckMessage.messageId).length;
+    } finally {
+      await lock.release();                                                                     // solta A mesmo se B não passou, para o teste não ficar pendurado
+    }
+    const stuckIds = [stuckMessage.data.externalTransactionId, nextStuckMessage.data.externalTransactionId];
+    await waitUntil("as duas de A processadas", async () => (await processedCount(stuckIds)) === 2);
+    await waitUntil("fila vazia", () => queueIsEmpty(ownQueues.inputQueueName));
+    await consumerApp.stop();
+
+    expect(freeMilliseconds).toBeLessThan(5_000);                                               // B não esperou A
+    expect(stuckProcessedWhileLocked).toBe(0);                                                  // A continuava presa enquanto B passou
+    expect(nextStuckReceivesWhileLocked).toBe(0);                                               // ordem por wallet: a seguinte de A não veio com a primeira em mãos
+    for (const message of [stuckMessage, nextStuckMessage, freeMessage]) {
+      expect(receiveCountsOf(record, message.messageId)).toEqual([1]);                          // nenhum recebimento gasto
+      expect(releasesOf(record, message.messageId)).toBe(0);
+    }
+    const stuckLedger = await testSql()`select t.external_transaction_id from wallet_ledger_entries e join wager_transactions t on t.id = e.transaction_id where e.wallet_id = ${stuck.walletId} and t.external_transaction_id in ${testSql()(stuckIds)} order by e.wallet_version`;
+    expect(stuckLedger.map((row: { external_transaction_id: string }) => row.external_transaction_id)).toEqual(stuckIds);   // A em ordem
+    expect(await drainQueue(ownQueues.deadLetterQueueName, 300)).toHaveLength(0);
+  });
+
+  test("o limite de mensagens em mãos é respeitado: com o limite em 1 e a mensagem da wallet A em mãos, a da wallet B só é recebida depois que A sai", async () => {
+    const { ownQueues, record, consumerApp, lock, stuckMessage, freeMessage } = await stuckWalletScenario({ CONSUMER_MAX_IN_FLIGHT_MESSAGES: "1" });
+    let freeReceivesWhileLocked = -1;
+    try {
+      await sendWagerMessage(ownQueues.inputQueueName, freeMessage);
+      await Bun.sleep(3_000);                                                                   // tempo de sobra para B ser buscada, se houvesse vaga
+      freeReceivesWhileLocked = receiveCountsOf(record, freeMessage.messageId).length;
+    } finally {
+      await lock.release();
+    }
+    await waitUntil("as duas processadas", async () => (await processedCount([stuckMessage.data.externalTransactionId, freeMessage.data.externalTransactionId])) === 2);
+    await waitUntil("fila vazia", () => queueIsEmpty(ownQueues.inputQueueName));
+    await consumerApp.stop();
+
+    expect(freeReceivesWhileLocked).toBe(0);                                                    // sem vaga, sem busca
+    expect(record.receives.every((batch) => batch.messages.length <= 1)).toBe(true);           // cada busca pede só o que cabe
+    expect(receiveCountsOf(record, stuckMessage.messageId)).toEqual([1]);
+    expect(receiveCountsOf(record, freeMessage.messageId)).toEqual([1]);
+    expect(await drainQueue(ownQueues.deadLetterQueueName, 300)).toHaveLength(0);
   });
 
   test("a métrica de DLQ lê o tamanho da fila, inclusive o que o SQS moveu", async () => {

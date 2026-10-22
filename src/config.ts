@@ -35,6 +35,7 @@ export interface AppConfig {
     retryCapMilliseconds: number;
     retryBudgetMilliseconds: number;         // o limite de tentativas: quanto tempo uma mensagem com falha transitória tenta de novo no consumidor antes da DLQ
     shutdownTimeoutMilliseconds: number;     // tempo para concluir mensagens em andamento no SIGTERM
+    maxInFlightMessages: number;             // quantas mensagens o consumidor segura ao mesmo tempo; a próxima busca não espera as outras terminarem
   };
   pendingReference: {
     enabled: boolean;
@@ -111,6 +112,7 @@ export function loadConfig(): AppConfig {
       retryCapMilliseconds: readInteger("CONSUMER_RETRY_CAP_MS", 60_000),
       retryBudgetMilliseconds: readInteger("CONSUMER_RETRY_BUDGET_MS", 300_000),             // 5 minutos desde a primeira falha
       shutdownTimeoutMilliseconds: readInteger("SHUTDOWN_IN_FLIGHT_TIMEOUT_MS", 20_000),
+      maxInFlightMessages: readInteger("CONSUMER_MAX_IN_FLIGHT_MESSAGES", 10),                 // o mesmo que cabe num recebimento
     },
     pendingReference: {
       enabled: readBoolean("PENDING_WORKER_ENABLED", true),
@@ -134,6 +136,7 @@ export function loadConfig(): AppConfig {
     logLevel: readString("LOG_LEVEL", "info"),
   };
   assertTimeoutOrder(config);
+  if (config.consumer.maxInFlightMessages < 1) throw new Error("CONSUMER_MAX_IN_FLIGHT_MESSAGES precisa ser pelo menos 1");   // com 0 o consumidor nunca buscaria nada
   return config;
 }
 

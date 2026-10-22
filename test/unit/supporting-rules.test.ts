@@ -134,7 +134,7 @@ describe("eventos, outbox e inbox", () => {
 });
 
 describe("ordem dos timeouts na configuração", () => {
-  const TIMEOUT_VARIABLES = ["DATABASE_LOCK_TIMEOUT", "DATABASE_STATEMENT_TIMEOUT", "DATABASE_BACKGROUND_LOCK_TIMEOUT", "DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "SQS_VISIBILITY_TIMEOUT_SECONDS", "SQS_MAX_RECEIVE_COUNT", "CONSUMER_RETRY_BUDGET_MS"];
+  const TIMEOUT_VARIABLES = ["DATABASE_LOCK_TIMEOUT", "DATABASE_STATEMENT_TIMEOUT", "DATABASE_BACKGROUND_LOCK_TIMEOUT", "DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "SQS_VISIBILITY_TIMEOUT_SECONDS", "SQS_MAX_RECEIVE_COUNT", "CONSUMER_RETRY_BUDGET_MS", "CONSUMER_MAX_IN_FLIGHT_MESSAGES"];
 
   function loadWith(environment: Record<string, string>) {
     const previous = Object.fromEntries(TIMEOUT_VARIABLES.map((name) => [name, process.env[name]]));
@@ -160,6 +160,11 @@ describe("ordem dos timeouts na configuração", () => {
     const config = loadWith({});
     expect(config.consumer.retryBudgetMilliseconds).toBe(300_000);
     expect(config.sqs.maxReceiveCount).toBe(10);
+    expect(config.consumer.maxInFlightMessages).toBe(10);                                       // até 10 mensagens em mãos por instância
+  });
+
+  test("um limite de mensagens em mãos menor que 1 é recusado na subida", () => {
+    expect(() => loadWith({ CONSUMER_MAX_IN_FLIGHT_MESSAGES: "0" })).toThrow("CONSUMER_MAX_IN_FLIGHT_MESSAGES precisa ser pelo menos 1");
   });
 
   test("a transação da fila que não cabe na visibilidade é recusada na subida", () => {

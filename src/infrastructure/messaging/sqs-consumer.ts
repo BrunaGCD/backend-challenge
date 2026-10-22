@@ -8,6 +8,8 @@
 // O orçamento de tentativas é do consumidor, não o ApproximateReceiveCount: um recebimento só é gasto
 // quando a mensagem sai das mãos dele (desligamento, processo morto), e o maxReceiveCount da fila fica
 // como rede de segurança para isso. Banco fora ou saturado também pausa o recebimento de mensagens novas.
+// A busca não espera os grupos em mãos terminarem, até o limite de mensagens em mãos: uma wallet presa
+// tentando de novo não segura as outras. O FIFO não entrega outra mensagem de um grupo em mãos.
 import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, ValidationError, WalletNotFoundError, type ApplicationError, type FieldError } from "../../application/errors";
 import { isDatabaseUnavailableError } from "../../application/infrastructure-errors";            // banco fora ou sem conexão livre
 import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
@@ -26,7 +28,8 @@ export interface ConsumerSettings {
   retryPolicy: RetryPolicy;
   retryBudgetMilliseconds: number;                                                              // quanto tempo uma mensagem tenta de novo no consumidor antes da DLQ
   shutdownTimeoutMilliseconds: number;
-  visibilityTimeoutMilliseconds: number;                                                        // o prazo de cada recebimento, o mesmo da fila
+  maxInFlightMessages: number;                                                                  // quantas mensagens ficam em mãos ao mesmo tempo, somando todos os grupos
+  visibilityTimeoutMilliseconds: number;                                                       // o prazo de cada recebimento, o mesmo da fila
   longestMessageMilliseconds: number;                                                           // o statement_timeout da fila: a estimativa do que uma mensagem espera no banco
   isDatabaseReady: () => Promise<boolean>;                                                      // a mesma checagem do banco que a readiness faz
 }
@@ -41,6 +44,7 @@ const ENVELOPE_FIELDS = ["messageId", "type", "occurredAt", "data"];
 const MESSAGE_ID_PATTERN = /^[\x21-\x7E]{1,128}$/;
 const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MAX_MESSAGES_PER_RECEIVE = 10;
+const WAIT_SECONDS_WITH_GROUPS_IN_HANDS = 1;                                                    // busca curta com grupos em mãos: no desligamento ela termina sozinha, sem cancelar
 const RETRY_BUDGET_EXHAUSTED = "RETRY_BUDGET_EXHAUSTED";                                        // reason na DLQ: transitório que não passou dentro do orçamento
 
 class PermanentMessageError extends Error {
@@ -64,6 +68,10 @@ export class SqsConsumer {
   private receiveAbort = new AbortController();
   private signalStop: () => void = () => {};
   private readonly stopRequested = new Promise<void>((resolve) => { this.signalStop = resolve; });   // acorda quem está esperando backoff ou o banco
+  private messagesInHands = 0;                                                                  // recebidas e ainda não confirmadas, mandadas para a DLQ ou devolvidas
+  private readonly groupsInHands = new Set<Promise<void>>();                                    // o desligamento espera todos eles
+  private wakeReceiver: () => void = () => {};                                                  // acorda a busca parada no limite quando uma mensagem sai das mãos
+  private receiveInProgress: Promise<unknown> = Promise.resolve();                              // a busca aberta; no desligamento os grupos só devolvem depois que ela termina
 
   constructor(
     private readonly queue: InputQueue,
@@ -82,7 +90,7 @@ export class SqsConsumer {
     if (!this.running) return;
     this.stopping = true;
     this.signalStop();
-    this.receiveAbort.abort();                                                                  // cancela o long polling em andamento
+    if (this.messagesInHands === 0) this.receiveAbort.abort();                                  // sem grupo em mãos, cancela o long polling; com grupo, a busca é curta e termina sozinha
     const timedOut = Symbol("timeout");
     const finished = await Promise.race([this.loopFinished.then(() => "done"), Bun.sleep(this.settings.shutdownTimeoutMilliseconds).then(() => timedOut)]);
     if (finished === timedOut) logger.warn({ event: "consumer_shutdown_timeout" }, "consumidor não terminou dentro do limite; o que sobrou volta pela visibilidade");
@@ -96,10 +104,18 @@ export class SqsConsumer {
         await this.waitForDatabase();                                                           // nenhuma mensagem nova enquanto o banco não responde
         continue;
       }
+      const freeSlots = this.settings.maxInFlightMessages - this.messagesInHands;               // quantas mensagens ainda cabem em mãos
+      if (freeSlots <= 0) {
+        await this.waitForFreeSlot();                                                           // no limite: só busca de novo quando alguma sair das mãos
+        continue;
+      }
       let messages: ReceivedMessage[] = [];
       let receivedAt = 0;
+      const waitTimeSeconds = this.messagesInHands > 0 ? Math.min(WAIT_SECONDS_WITH_GROUPS_IN_HANDS, this.settings.waitTimeSeconds) : this.settings.waitTimeSeconds;
       try {
-        messages = await this.queue.receive(MAX_MESSAGES_PER_RECEIVE, this.settings.waitTimeSeconds, this.receiveAbort.signal);
+        const receiving = this.queue.receive(Math.min(MAX_MESSAGES_PER_RECEIVE, freeSlots), waitTimeSeconds, this.receiveAbort.signal);
+        this.receiveInProgress = receiving.catch(() => undefined);                              // o erro é tratado logo abaixo
+        messages = await receiving;
         receivedAt = performance.now();                                                         // o prazo de visibilidade começa a contar aqui
         consecutiveReceiveFailures = 0;
       } catch (error) {
@@ -110,8 +126,20 @@ export class SqsConsumer {
         await this.sleepUnlessStopping(waitMilliseconds);
         continue;
       }
-      await this.processBatch(messages, receivedAt);
+      this.startGroups(messages, receivedAt);                                                   // não espera: a próxima busca sai com estes grupos em mãos (desligando, eles devolvem na hora)
     }
+    await Promise.all([...this.groupsInHands]);                                                 // desligando: cada grupo termina a mensagem em andamento e devolve as outras
+  }
+
+  private async waitForFreeSlot(): Promise<void> {
+    const slotFreed = new Promise<void>((resolve) => { this.wakeReceiver = resolve; });
+    await Promise.race([slotFreed, this.stopRequested]);
+  }
+
+  private markOutOfHands(count: number): void {
+    if (count === 0) return;
+    this.messagesInHands = this.messagesInHands - count;
+    this.wakeReceiver();                                                                        // abriu vaga para a busca
   }
 
   // ----------------------------------------------------------------------------------------------------
@@ -141,26 +169,33 @@ export class SqsConsumer {
   // ----------------------------------------------------------------------------------------------------
   //                                    LOTE E GRUPO (WALLET)
   // ----------------------------------------------------------------------------------------------------
-  // grupos diferentes em paralelo; dentro do grupo, em ordem
-  private async processBatch(messages: ReceivedMessage[], receivedAt: number): Promise<void> {
+  // grupos diferentes em paralelo, entre si e com os que já estavam em mãos; dentro do grupo, em ordem
+  private startGroups(messages: ReceivedMessage[], receivedAt: number): void {
     const messagesByGroup = new Map<string, ReceivedMessage[]>();
     for (const message of messages) {
       const group = messagesByGroup.get(message.groupId) ?? [];
       group.push(message);
       messagesByGroup.set(message.groupId, group);
     }
-    await Promise.all([...messagesByGroup.values()].map((group) => this.processGroup(group, receivedAt)));
+    this.messagesInHands = this.messagesInHands + messages.length;
+    for (const group of messagesByGroup.values()) {
+      const groupInHands: Promise<void> = this.processGroup(group, receivedAt)
+        .catch((error: unknown) => { logger.error({ event: "sqs_group_failed", ...errorSummary(error) }, "erro inesperado no grupo; as mensagens que sobraram voltam pela visibilidade"); })
+        .finally(() => { this.groupsInHands.delete(groupInHands); });
+      this.groupsInHands.add(groupInHands);
+    }
   }
 
   // O grupo inteiro fica com o consumidor até a última mensagem terminar, inclusive quando a da frente
   // falha: devolver as seguintes gastaria um recebimento delas sem elas terem sido tentadas.
   private async processGroup(group: ReceivedMessage[], receivedAt: number): Promise<void> {
+    let messagesLeft = group.length;                                                            // as do grupo que ainda estão em mãos
     const visibility = new GroupVisibility(this.queue, group, receivedAt, this.settings.visibilityTimeoutMilliseconds);
     visibility.startWatching();                                                                 // estende sozinho se o processamento ou a espera passar do estimado
     try {
       for (const message of group) {
         if (this.stopping) {
-          await visibility.release();                                                           // recebida e não iniciada: volta na hora
+          await this.releaseOnShutdown(visibility);                                             // recebida e não iniciada: volta na hora
           return;
         }
         if (!visibility.hasLeft(this.settings.longestMessageMilliseconds)) {                    // não cabe mais uma espera inteira no que sobrou
@@ -172,14 +207,24 @@ export class SqsConsumer {
         }
         const result = await this.processMessage(message);
         if (result === "stopped") {
-          await visibility.release();                                                           // desligando com esta esperando nova tentativa: ela e as seguintes voltam
+          await this.releaseOnShutdown(visibility);                                             // desligando com esta esperando nova tentativa: ela e as seguintes voltam
           return;
         }
         visibility.finish(message);
+        messagesLeft = messagesLeft - 1;
+        this.markOutOfHands(1);                                                                 // terminou: abre vaga sem esperar o resto do grupo
       }
     } finally {
       visibility.stopWatching();
+      this.markOutOfHands(messagesLeft);                                                        // as devolvidas também saíram das mãos
     }
+  }
+
+  // Uma busca aberta pegaria a mensagem assim que ela voltasse, e isso gastaria mais um recebimento
+  // dela; cancelada, seria pior, porque o SQS ainda pode entregar para uma conexão que ninguém lê mais.
+  private async releaseOnShutdown(visibility: GroupVisibility): Promise<void> {
+    await this.receiveInProgress;                                                               // no máximo a busca curta de 1 s
+    await visibility.release();
   }
 
   // ----------------------------------------------------------------------------------------------------
