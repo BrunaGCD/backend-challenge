@@ -66,10 +66,10 @@ describe("cenário 5: worker morto depois do commit e antes do ack", () => {
 
 describe("cenário 8: reinício no meio da carga, com consistência final comprovada", () => {
   test("SIGKILL numa das 3 instâncias durante a carga: cada operação enviada vira exatamente uma transação, nenhuma vai para a DLQ, e o saldo de cada wallet bate", async () => {
-    // maxReceiveCount e espera do lock da fila de produção; visibilidade de 20 s (30 em produção) para o
+    // maxReceiveCount, orçamento de novas tentativas e espera do lock da fila de produção; visibilidade de 20 s (30 em produção) para o
     // teste não demorar, acima dos 15 s de statement_timeout da fila
-    const queues = await createTestQueues("restart", { visibilityTimeoutSeconds: 20, maxReceiveCount: 5, waitTimeSeconds: 1 });
-    const productionLike = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "5", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
+    const queues = await createTestQueues("restart", { visibilityTimeoutSeconds: 20, maxReceiveCount: 10, waitTimeSeconds: 1 });
+    const productionLike = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "10", CONSUMER_RETRY_BUDGET_MS: "300000", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
     const instances = [await start("load-1", queues, undefined, productionLike), await start("load-2", queues, undefined, productionLike), await start("load-3", queues, undefined, productionLike)];
     const wallets = [];
     for (let index = 0; index < 5; index++) {
@@ -126,7 +126,7 @@ describe("cenário 8: reinício no meio da carga, com consistência final compro
     }, 30_000);
 
     // Toda operação enviada virou exatamente uma transação e nada foi para a DLQ. A instância morta gasta
-    // um recebimento das mensagens que tinha em mãos, e a fila espera o lock até 10 s, então sobram
+    // um recebimento das mensagens que tinha em mãos, e as falhas transitórias tentam de novo no próprio consumidor, então sobram
     // recebimentos de folga. Se algo faltar, o log de cada mensagem sai abaixo para o diagnóstico.
     const recordedIds = new Set((await testSql()`select external_transaction_id from wager_transactions where wallet_id in ${testSql()(wallets.map((wallet) => wallet.walletId))}`).map((row: any) => row.external_transaction_id as string));
     const missing = sent.filter((operation) => !recordedIds.has(operation.input.externalTransactionId!));

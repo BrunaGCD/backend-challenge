@@ -33,6 +33,7 @@ export interface AppConfig {
     name: string;                            // consumer_name da inbox
     retryBaseMilliseconds: number;
     retryCapMilliseconds: number;
+    retryBudgetMilliseconds: number;         // o limite de tentativas: quanto tempo uma mensagem com falha transitória tenta de novo no consumidor antes da DLQ
     shutdownTimeoutMilliseconds: number;     // tempo para concluir mensagens em andamento no SIGTERM
   };
   pendingReference: {
@@ -100,7 +101,7 @@ export function loadConfig(): AppConfig {
       deadLetterQueueName: readString("SQS_DEAD_LETTER_QUEUE", "wager-transactions-dlq.fifo"),
       eventsQueueName: readString("SQS_EVENTS_QUEUE", "wagering-events.fifo"),
       visibilityTimeoutSeconds: readInteger("SQS_VISIBILITY_TIMEOUT_SECONDS", 30),
-      maxReceiveCount: readInteger("SQS_MAX_RECEIVE_COUNT", 5),
+      maxReceiveCount: readInteger("SQS_MAX_RECEIVE_COUNT", 10),                              // rede de segurança: só desligamento e processo morto gastam recebimento
       waitTimeSeconds: readInteger("SQS_WAIT_TIME_SECONDS", 20),
     },
     consumer: {
@@ -108,6 +109,7 @@ export function loadConfig(): AppConfig {
       name: readString("CONSUMER_NAME", "wager-transactions-consumer"),
       retryBaseMilliseconds: readInteger("CONSUMER_RETRY_BASE_MS", 2_000),
       retryCapMilliseconds: readInteger("CONSUMER_RETRY_CAP_MS", 60_000),
+      retryBudgetMilliseconds: readInteger("CONSUMER_RETRY_BUDGET_MS", 300_000),             // 5 minutos desde a primeira falha
       shutdownTimeoutMilliseconds: readInteger("SHUTDOWN_IN_FLIGHT_TIMEOUT_MS", 20_000),
     },
     pendingReference: {

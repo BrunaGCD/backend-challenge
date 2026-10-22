@@ -116,9 +116,11 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     acceptedCurrencies: config.acceptedCurrencies,
     waitTimeSeconds: config.sqs.waitTimeSeconds,
     retryPolicy: retryPolicy(config.consumer.retryBaseMilliseconds, config.consumer.retryCapMilliseconds, random),
+    retryBudgetMilliseconds: config.consumer.retryBudgetMilliseconds,
     shutdownTimeoutMilliseconds: config.consumer.shutdownTimeoutMilliseconds,
     visibilityTimeoutMilliseconds: config.sqs.visibilityTimeoutSeconds * 1_000,
-    longestMessageMilliseconds: intervalMilliseconds("DATABASE_BACKGROUND_STATEMENT_TIMEOUT", config.database.backgroundStatementTimeout),   // o máximo que uma mensagem espera no banco
+    longestMessageMilliseconds: intervalMilliseconds("DATABASE_BACKGROUND_STATEMENT_TIMEOUT", config.database.backgroundStatementTimeout),   // a estimativa do que uma mensagem espera no banco
+    isDatabaseReady: async () => (await database.schemaStatus()) === "ok",                     // a mesma checagem do banco da readiness, abaixo
   });
 
   // ----------------------------------------------------------------------------------------------------

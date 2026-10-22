@@ -12,6 +12,7 @@ export const transactionsTotal = new Counter({ name: "wagering_transactions_tota
 export const duplicatesTotal = new Counter({ name: "wagering_duplicates_total", help: "Duplicatas detectadas (replay pela idempotency key ou mensagem já vista na inbox)", labelNames: ["source"], registers });
 export const idempotencyConflictsTotal = new Counter({ name: "wagering_idempotency_conflicts_total", help: "Mesma idempotency key (ou mesmo externalTransactionId) com payload diferente", labelNames: ["type"], registers });
 export const retriesTotal = new Counter({ name: "wagering_retries_total", help: "Novas tentativas agendadas, por componente", labelNames: ["component"], registers });
+export const consumerPausesTotal = new Counter({ name: "wagering_consumer_pauses_total", help: "Vezes que o consumidor parou de buscar mensagens porque o banco estava indisponível ou saturado", labelNames: ["reason"], registers });
 export const dlqMessages = new Gauge({ name: "wagering_dlq_messages", help: "Mensagens na DLQ (ApproximateNumberOfMessages)", registers });
 export const dlqForwardedTotal = new Counter({ name: "wagering_dlq_forwarded_total", help: "Mensagens enviadas explicitamente para a DLQ, por motivo", labelNames: ["reason"], registers });
 export const walletLockWaitSeconds = new Histogram({ name: "wagering_wallet_lock_wait_seconds", help: "Tempo do SELECT ... FOR UPDATE da wallet (espera pelo lock)", buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5], registers });

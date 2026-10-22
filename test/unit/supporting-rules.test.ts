@@ -2,7 +2,7 @@
 //   BACKOFF COM ALEATÓRIO INJETADO, CLASSIFICAÇÃO DE ERROS, CURSOR DO LEDGER, OUTBOX E INBOX
 // ====================================================================================================
 import { describe, expect, test } from "bun:test";
-import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "../../src/application/infrastructure-errors";
+import { concurrencyConflictType, isDatabaseUnavailableError, isTransientInfrastructureError, uniqueViolationConstraint } from "../../src/application/infrastructure-errors";
 import { ConcurrentUpdateError, InvalidCursorError } from "../../src/application/errors";
 import { loadConfig } from "../../src/config";                                                  // ordem dos timeouts
 import { decodeLedgerCursor, encodeLedgerCursor } from "../../src/application/queries";
@@ -46,6 +46,21 @@ describe("classificação de erros de infraestrutura", () => {
 
   test("erro comum não é transitório", () => {
     expect(isTransientInfrastructureError(new TypeError("bug"))).toBe(false);
+  });
+
+  // banco fora ou saturado pausa o consumidor; lock, statement_timeout e deadlock são da operação
+  test.each(["08006", "08001", "57P01", "57P03", "53300", "ECONNREFUSED", "ENOTFOUND"])("%s é banco indisponível", (code) => {
+    expect(isDatabaseUnavailableError(withCode(code))).toBe(true);
+  });
+
+  test.each(["55P03", "57014", "40P01", "40001", "23505"])("%s não é banco indisponível", (code) => {
+    expect(isDatabaseUnavailableError(withCode(code))).toBe(false);
+  });
+
+  test("pool sem conexão livre e conexão caída são banco indisponível", () => {
+    expect(isDatabaseUnavailableError(new Error("timeout exceeded when trying to connect"))).toBe(true);
+    expect(isDatabaseUnavailableError(new Error("Connection terminated unexpectedly"))).toBe(true);
+    expect(isDatabaseUnavailableError(new TypeError("bug"))).toBe(false);
   });
 
   test("tipo de conflito de concorrência e constraint da violação de unicidade", () => {
@@ -119,7 +134,7 @@ describe("eventos, outbox e inbox", () => {
 });
 
 describe("ordem dos timeouts na configuração", () => {
-  const TIMEOUT_VARIABLES = ["DATABASE_LOCK_TIMEOUT", "DATABASE_STATEMENT_TIMEOUT", "DATABASE_BACKGROUND_LOCK_TIMEOUT", "DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "SQS_VISIBILITY_TIMEOUT_SECONDS"];
+  const TIMEOUT_VARIABLES = ["DATABASE_LOCK_TIMEOUT", "DATABASE_STATEMENT_TIMEOUT", "DATABASE_BACKGROUND_LOCK_TIMEOUT", "DATABASE_BACKGROUND_STATEMENT_TIMEOUT", "SQS_VISIBILITY_TIMEOUT_SECONDS", "SQS_MAX_RECEIVE_COUNT", "CONSUMER_RETRY_BUDGET_MS"];
 
   function loadWith(environment: Record<string, string>) {
     const previous = Object.fromEntries(TIMEOUT_VARIABLES.map((name) => [name, process.env[name]]));
@@ -139,6 +154,12 @@ describe("ordem dos timeouts na configuração", () => {
     const config = loadWith({});
     expect(config.database).toMatchObject({ lockTimeout: "2s", statementTimeout: "5s", backgroundLockTimeout: "10s", backgroundStatementTimeout: "15s" });
     expect(config.sqs.visibilityTimeoutSeconds).toBe(30);
+  });
+
+  test("os padrões da fila: 5 minutos de novas tentativas no consumidor, e maxReceiveCount 10 só como rede de segurança", () => {
+    const config = loadWith({});
+    expect(config.consumer.retryBudgetMilliseconds).toBe(300_000);
+    expect(config.sqs.maxReceiveCount).toBe(10);
   });
 
   test("a transação da fila que não cabe na visibilidade é recusada na subida", () => {

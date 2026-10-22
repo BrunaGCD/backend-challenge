@@ -13,10 +13,10 @@ let queues: TestQueues;
 let instances: Instance[] = [];
 let hotWalletId = "";
 
-// maxReceiveCount e espera do lock da fila de produção; a visibilidade fica em 20 s (30 em produção) só
+// maxReceiveCount, orçamento de novas tentativas e espera do lock da fila de produção; a visibilidade fica em 20 s (30 em produção) só
 // para o teste não demorar, e continua acima dos 15 s de statement_timeout da fila
-const PRODUCTION_LIKE_QUEUE = { visibilityTimeoutSeconds: 20, maxReceiveCount: 5, waitTimeSeconds: 1 };
-const PRODUCTION_LIKE_ENVIRONMENT = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "5", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
+const PRODUCTION_LIKE_QUEUE = { visibilityTimeoutSeconds: 20, maxReceiveCount: 10, waitTimeSeconds: 1 };
+const PRODUCTION_LIKE_ENVIRONMENT = { SQS_VISIBILITY_TIMEOUT_SECONDS: "20", SQS_MAX_RECEIVE_COUNT: "10", CONSUMER_RETRY_BUDGET_MS: "300000", DATABASE_BACKGROUND_LOCK_TIMEOUT: "10s", DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "15s" };
 
 beforeAll(async () => {
   queues = await createTestQueues("hot", PRODUCTION_LIKE_QUEUE);
@@ -93,7 +93,7 @@ test("300 operações (BET, WIN, REFUND, ROLLBACK e repetições) numa wallet s�
                                  from wager_transactions t left join wager_transactions r on r.id = t.reference_transaction_id
                                 where t.wallet_id = ${walletId} and t.kind <> 'OPENING'`;
   // Toda operação única virou exatamente uma transação (repetição não vira outra), e nenhuma mensagem
-  // válida foi para a DLQ: a fila espera o lock até 10 s, então a disputa não esgota o maxReceiveCount.
+  // válida foi para a DLQ: o lock_timeout tenta de novo no próprio consumidor, sem gastar recebimento, até o orçamento de 5 min.
   const uniqueOperations = new Set(operations.map((operation) => operation.externalTransactionId!));
   const recorded = new Set(rows.map((row: any) => row.external_transaction_id as string));
   expect(recorded.size).toBe(rows.length);                                                      // nenhuma operação duplicada

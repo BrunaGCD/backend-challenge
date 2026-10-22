@@ -79,6 +79,7 @@ export function testEnvironment(queues: TestQueues, extra: Record<string, string
     DATABASE_BACKGROUND_STATEMENT_TIMEOUT: "2500ms",
     CONSUMER_RETRY_BASE_MS: "200",
     CONSUMER_RETRY_CAP_MS: "1000",
+    CONSUMER_RETRY_BUDGET_MS: "10000",                                                          // 5 min em produção
     SHUTDOWN_IN_FLIGHT_TIMEOUT_MS: "5000",
     PENDING_WORKER_INTERVAL_MS: "200",
     PENDING_REFERENCE_TTL_MS: "4000",
