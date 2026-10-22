@@ -3,7 +3,8 @@
 // ====================================================================================================
 // Desde a migration 005, o banco confere no commit que saldo e version da wallet são os do último
 // lançamento. Por isso os fixtures montam estados coerentes (wallet, OPENING e lançamento numa
-// transação só) e cada movimento muda o lançamento e a wallet juntos.
+// transação só) e cada movimento muda o lançamento e a wallet juntos. Desde a 006, a transação processada
+// com referência precisa do mesmo player da referência, então os fixtures usam um player só por padrão.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { Money } from "../../src/domain/money";
@@ -26,6 +27,7 @@ async function expectSqlError(statement: Promise<unknown>, expectedFragment: str
 const ids = () => Bun.randomUUIDv7();
 const HASH = "a".repeat(64);
 const NOW = "2026-07-29T15:00:00Z";
+const PLAYER_ID = ids();                                                                        // o player das transações, salvo quando o teste escolhe outro
 
 // ----------------------------------------------------------------------------------------------------
 //                                          FIXTURES
@@ -39,7 +41,7 @@ interface TransactionColumns {
   id?: string; provider_id?: string | null; external_transaction_id?: string | null; idempotency_key?: string; payload_hash?: string;
   wallet_id: string; kind?: string; amount?: string; currency?: string; reference_external_transaction_id?: string | null;
   reference_transaction_id?: string | null; status?: string; failure_code?: string | null; processed_at?: string | null;
-  round_id?: string | null; game_id?: string | null;
+  round_id?: string | null; game_id?: string | null; player_id?: string; balance_after?: string;
 }
 
 function transactionRow(columns: TransactionColumns) {
@@ -51,7 +53,7 @@ function transactionRow(columns: TransactionColumns) {
     idempotency_key: columns.idempotency_key ?? `key-${ids()}`,
     payload_hash: columns.payload_hash ?? HASH,
     wallet_id: columns.wallet_id,
-    player_id: ids(),
+    player_id: columns.player_id ?? PLAYER_ID,
     round_id: columns.round_id === undefined ? "round-1" : columns.round_id,
     game_id: columns.game_id === undefined ? "game-1" : columns.game_id,
     kind: columns.kind ?? "BET",
@@ -61,7 +63,7 @@ function transactionRow(columns: TransactionColumns) {
     reference_transaction_id: columns.reference_transaction_id ?? null,
     status: columns.status ?? "PROCESSED",
     failure_code: columns.failure_code ?? null,
-    balance_after: "90.00",
+    balance_after: columns.balance_after ?? "90.00",
     balance_currency: "BRL",
     correlation_id: "corr",
     attempts: 0,
@@ -134,19 +136,35 @@ afterAll(async () => {
   await sql.close();
 });
 
+// tudo o que as migrations criam no schema public, para comparar dois momentos do schema
+async function schemaFingerprint() {
+  const functions = await sql`select proname, md5(prosrc) as body from pg_proc where pronamespace = 'public'::regnamespace order by proname`;
+  const constraints = await sql`select conname, pg_get_constraintdef(oid) as definition from pg_constraint where connamespace = 'public'::regnamespace order by conname`;
+  const triggers = await sql`select tgname, pg_get_triggerdef(oid) as definition from pg_trigger where not tgisinternal order by tgname`;
+  const indexes = await sql`select indexname, indexdef from pg_indexes where schemaname = 'public' order by indexname`;
+  return { functions, constraints, triggers, indexes };
+}
+
 describe("migrations", () => {
-  test("up -> down -> up deixa o schema completo, e o down remove tudo", async () => {
+  test("up -> down -> up deixa o schema completo, cada down desfaz só a sua, e o down remove tudo", async () => {
     const orm = await createOrm({ databaseUrl, poolMax: 2, idleInTransactionTimeoutMilliseconds: 10_000, connectTimeoutMilliseconds: 3_000, silentMigrations: true });
     const tablesQuery = () => sql`select table_name from information_schema.tables where table_schema = 'public' and table_name <> 'schema_migrations' order by table_name`;
-    const functionNames = ["wager_transactions_guard", "wager_transactions_forbid_truncate", "wallet_ledger_entries_forbid_change", "wallets_guard", "wallets_forbid_truncate", "wallet_ledger_entries_check_transaction", "wallets_check_matches_last_entry"];
+    const functionNames = ["wager_transactions_guard", "wager_transactions_forbid_truncate", "wallet_ledger_entries_forbid_change", "wallets_guard", "wallets_forbid_truncate", "wallet_ledger_entries_check_transaction", "wallets_check_matches_last_entry", "wager_transactions_check_reference", "outbox_messages_guard", "outbox_messages_forbid_truncate"];
     const functionsQuery = () => sql`select proname from pg_proc where proname in ${sql(functionNames)} order by proname`;
     const versionDefaultQuery = async () => (await sql`select column_default from information_schema.columns where table_name = 'wallets' and column_name = 'version'`)[0]?.column_default;
+
+    await orm.migrator.up({ to: "005-protect-wallets-and-ledger" });
+    const schemaAt005 = await schemaFingerprint();                                              // o estado que o down da 006 precisa devolver
 
     await orm.migrator.up();
     const afterFirstUp = (await tablesQuery()).map((row: any) => row.table_name);
     expect(afterFirstUp).toEqual(["inbox_messages", "outbox_messages", "wager_transactions", "wallet_ledger_entries", "wallets"]);
     expect((await functionsQuery()).map((row: any) => row.proname)).toEqual([...functionNames].sort());
     expect(await versionDefaultQuery()).toBe("1");
+    expect(await schemaFingerprint()).not.toEqual(schemaAt005);
+
+    await orm.migrator.down();                                                                  // só a 006
+    expect(await schemaFingerprint()).toEqual(schemaAt005);                                     // inclusive a função do trigger adiado, de volta à da 005
 
     await orm.migrator.down();                                                                  // só a 005
     expect(await versionDefaultQuery()).toBeNull();
@@ -414,5 +432,103 @@ describe("inbox e outbox", () => {
     await expectSqlError(sql`insert into outbox_messages (id, aggregate_id, event_type, payload, occurred_at, attempts, next_attempt_at) values (${ids()}, ${ids()}, 'X', '{}', ${NOW}, -1, ${NOW})`, "outbox_messages_attempts_non_negative");
     const [index] = await sql`select indexdef from pg_indexes where indexname = 'outbox_messages_due'`;
     expect(index.indexdef).toContain("WHERE (published_at IS NULL)");
+  });
+});
+
+describe("direção do lançamento, referência e outbox no banco (006)", () => {
+  const WRONG_DIRECTION = "nao bate com o tipo da transacao";
+
+  // transação PROCESSED que aponta para outra, com o mesmo provedor, player, rodada e moeda por padrão
+  function referencing(walletId: string, kind: string, reference: { id: string; external_transaction_id: string | null }, columns: Partial<TransactionColumns> = {}) {
+    return insertTransaction({ wallet_id: walletId, kind, reference_external_transaction_id: reference.external_transaction_id, reference_transaction_id: reference.id, ...columns });
+  }
+
+  test("a direção do lançamento vem do tipo: BET só DEBIT, WIN/REFUND/OPENING só CREDIT, ROLLBACK o inverso da referência", async () => {
+    const walletId = await openWallet("100.00");
+    const bet = insertTransaction({ wallet_id: walletId, kind: "BET" });
+    const win = insertTransaction({ wallet_id: walletId, kind: "WIN" });
+    const refundedBet = insertTransaction({ wallet_id: walletId, kind: "BET" });                // a do REFUND, para não somar duas reversões na mesma BET
+    for (const transaction of [bet, win, refundedBet]) await transaction.query;
+    const refund = referencing(walletId, "REFUND", refundedBet.row);
+    const rollbackOfBet = referencing(walletId, "ROLLBACK", bet.row);
+    const rollbackOfWin = referencing(walletId, "ROLLBACK", win.row);
+    for (const transaction of [refund, rollbackOfBet, rollbackOfWin]) await transaction.query;
+
+    // cada par: a direção errada é recusada no commit, a certa passa
+    const movements: [string, "DEBIT" | "CREDIT", "DEBIT" | "CREDIT"][] = [
+      [bet.row.id, "CREDIT", "DEBIT"],
+      [win.row.id, "DEBIT", "CREDIT"],
+      [refund.row.id, "DEBIT", "CREDIT"],
+      [rollbackOfBet.row.id, "DEBIT", "CREDIT"],                                                // ROLLBACK de BET devolve o dinheiro
+      [rollbackOfWin.row.id, "CREDIT", "DEBIT"],                                                // ROLLBACK de WIN tira de volta
+    ];
+    for (const [transactionId, wrongDirection, rightDirection] of movements) {
+      await expectSqlError(sql.begin((open) => postEntry(open, walletId, transactionId, wrongDirection, "10.00")), WRONG_DIRECTION);
+      await sql.begin((open) => postEntry(open, walletId, transactionId, rightDirection, "10.00"));
+    }
+    expect(await walletState(walletId)).toEqual({ balance: "110.00", version: 6 });            // 100 - 10 + 10 + 10 + 10 - 10, uma versão por movimento certo
+
+    const walletWithoutOpening = await openWallet("0.00");
+    const firstWin = insertTransaction({ wallet_id: walletWithoutOpening, kind: "WIN" });
+    await firstWin.query;
+    await sql.begin((open) => postEntry(open, walletWithoutOpening, firstWin.row.id, "CREDIT", "10.00"));   // saldo para o débito errado não ficar negativo
+    const opening = insertTransaction(openingColumns(walletWithoutOpening, "10.00", "BRL"));
+    await opening.query;
+    await expectSqlError(sql.begin((open) => postEntry(open, walletWithoutOpening, opening.row.id, "DEBIT", "10.00")), WRONG_DIRECTION);
+  });
+
+  test("a referência é da mesma wallet (FK composta para a transação e a wallet)", async () => {
+    const walletId = await openWallet();
+    const otherWalletId = await openWallet();
+    const otherBet = insertTransaction({ wallet_id: otherWalletId, kind: "BET" });
+    await otherBet.query;
+    await expectSqlError(referencing(walletId, "REFUND", otherBet.row).query, "wager_transactions_reference_same_wallet_fk");
+    await expectSqlError(referencing(walletId, "ROLLBACK", otherBet.row, { status: "REJECTED", failure_code: "REFERENCE_MISMATCH" }).query, "wager_transactions_reference_same_wallet_fk");   // vale em qualquer status
+  });
+
+  test("transação PROCESSED com referência: mesmo provedor, player, rodada e moeda, tipo da regra 3 e valor igual na reversão", async () => {
+    const walletId = await openWallet();
+    const bet = insertTransaction({ wallet_id: walletId, kind: "BET" });
+    const win = insertTransaction({ wallet_id: walletId, kind: "WIN" });
+    for (const transaction of [bet, win]) await transaction.query;
+    const SAME_IDENTITY = "mesmo provedor, player, rodada e moeda";
+    const KIND_NOT_ALLOWED = "nao e permitido para o tipo dela";
+
+    await expectSqlError(referencing(walletId, "REFUND", bet.row, { player_id: ids() }).query, SAME_IDENTITY);
+    await expectSqlError(referencing(walletId, "REFUND", bet.row, { provider_id: "provider-b" }).query, SAME_IDENTITY);
+    await expectSqlError(referencing(walletId, "REFUND", bet.row, { round_id: "round-2" }).query, SAME_IDENTITY);
+    await expectSqlError(referencing(walletId, "REFUND", bet.row, { currency: "USD" }).query, SAME_IDENTITY);
+    await expectSqlError(referencing(walletId, "REFUND", win.row).query, KIND_NOT_ALLOWED);    // REFUND só de BET
+    await expectSqlError(referencing(walletId, "WIN", win.row).query, KIND_NOT_ALLOWED);       // WIN só de BET
+    await expectSqlError(referencing(walletId, "LOSS", win.row, { amount: "0.00" }).query, KIND_NOT_ALLOWED);   // o LOSS não tem lançamento, e mesmo assim é conferido
+    await expectSqlError(referencing(walletId, "REFUND", bet.row, { amount: "5.00" }).query, "mesmo valor da referencia");
+
+    const pendingWithOtherPlayer = referencing(walletId, "REFUND", bet.row, { status: "PENDING_REFERENCE", processed_at: null, reference_transaction_id: null, player_id: ids() });
+    await pendingWithOtherPlayer.query;                                                         // pendente sem referência interna não é conferida
+    await expectSqlError(sql`update wager_transactions set status = 'PROCESSED', processed_at = now(), reference_transaction_id = ${bet.row.id} where id = ${pendingWithOtherPlayer.row.id}`, SAME_IDENTITY);   // ao virar PROCESSED, é
+
+    await referencing(walletId, "WIN", bet.row, { amount: "25.00" }).query;                    // WIN pode ter outro valor
+    await referencing(walletId, "ROLLBACK", win.row).query;                                     // ROLLBACK de WIN, com tudo igual
+    await referencing(walletId, "REFUND", bet.row).query;                                       // a reversão certa passa
+  });
+
+  test("outbox: sem DELETE nem TRUNCATE, published_at não volta a nulo, e o evento gravado não muda", async () => {
+    const eventId = ids();
+    await sql`insert into outbox_messages (id, aggregate_id, event_type, payload, occurred_at, attempts, next_attempt_at) values (${eventId}, ${ids()}, 'WalletBalanceChanged', '{"walletVersion": 2}', ${NOW}, 0, ${NOW})`;
+    await sql`update outbox_messages set attempts = 1, last_error = 'SQS fora', next_attempt_at = now() where id = ${eventId}`;   // o publisher reagenda
+    await expectSqlError(sql`update outbox_messages set payload = '{"walletVersion": 3}' where id = ${eventId}`, "nao mudam");
+    await expectSqlError(sql`update outbox_messages set event_type = 'Outro' where id = ${eventId}`, "nao mudam");
+    await expectSqlError(sql`update outbox_messages set occurred_at = now() where id = ${eventId}`, "nao mudam");
+    await sql`update outbox_messages set published_at = now() where id = ${eventId}`;          // o publisher marca como publicado
+    await expectSqlError(sql`update outbox_messages set published_at = null where id = ${eventId}`, "nao volta a nulo");
+    await expectSqlError(sql`delete from outbox_messages where id = ${eventId}`, "DELETE proibido");
+    await expectSqlError(sql`truncate outbox_messages`, "TRUNCATE proibido");
+    const [stillPublished] = await sql`select count(*)::int as total from outbox_messages where id = ${eventId} and published_at is not null`;
+    expect(stillPublished.total).toBe(1);
+  });
+
+  test("o saldo observado gravado na transação não é negativo", async () => {
+    const walletId = await openWallet();
+    await expectSqlError(insertTransaction({ wallet_id: walletId, balance_after: "-0.01" }).query, "wager_transactions_balance_after_non_negative");
   });
 });

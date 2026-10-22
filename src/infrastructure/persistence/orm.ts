@@ -9,6 +9,7 @@ import { CreateWagerTransactions } from "./migrations/002-create-wager-transacti
 import { CreateWalletLedgerEntries } from "./migrations/003-create-wallet-ledger-entries";
 import { CreateInboxAndOutbox } from "./migrations/004-create-inbox-and-outbox";
 import { ProtectWalletsAndLedger } from "./migrations/005-protect-wallets-and-ledger";
+import { ProtectReferencesAndOutbox } from "./migrations/006-protect-references-and-outbox";
 
 export interface OrmOptions {
   databaseUrl: string;
@@ -18,7 +19,7 @@ export interface OrmOptions {
   silentMigrations?: boolean;                                                                   // testes não precisam do log do Migrator
 }
 
-export const MIGRATIONS = [CreateWallets, CreateWagerTransactions, CreateWalletLedgerEntries, CreateInboxAndOutbox, ProtectWalletsAndLedger];   // em ordem
+export const MIGRATIONS = [CreateWallets, CreateWagerTransactions, CreateWalletLedgerEntries, CreateInboxAndOutbox, ProtectWalletsAndLedger, ProtectReferencesAndOutbox];   // em ordem
 
 export async function createOrm(options: OrmOptions): Promise<MikroORM> {
   return MikroORM.init({
