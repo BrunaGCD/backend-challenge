@@ -106,6 +106,7 @@ export class SqsConsumer {
   }
 
   private async processGroup(group: ReceivedMessage[], receivedAt: number): Promise<void> {
+    let visibilityStartedAt = receivedAt;                                                       // de onde o prazo do grupo conta; cada extensão recomeça a contagem
     for (let index = 0; index < group.length; index++) {
       const message = group[index]!;
       const remaining = group.slice(index + 1);
@@ -113,10 +114,14 @@ export class SqsConsumer {
         await this.releaseVisibility([message, ...remaining]);                                  // recebida e não iniciada: volta na hora
         return;
       }
-      if (!this.fitsInVisibility(receivedAt)) {
-        logger.info({ event: "sqs_visibility_running_out", released: 1 + remaining.length }, "o prazo de visibilidade não cabe mais uma espera inteira; as mensagens que faltam do grupo voltam para a fila");
-        await this.releaseVisibility([message, ...remaining]);                                  // voltam na hora, em vez de vencer no meio do processamento
-        return;
+      if (!this.fitsInVisibility(visibilityStartedAt)) {
+        const extensionStartedAt = performance.now();                                           // medido antes da chamada: o prazo novo nunca acaba antes do que o consumidor acha
+        const extended = await this.extendVisibility([message, ...remaining]);
+        if (!extended) {
+          await this.releaseVisibility([message, ...remaining]);                                // sem extensão o prazo venceria no meio; voltam na hora
+          return;
+        }
+        visibilityStartedAt = extensionStartedAt;
       }
       const outcome = await this.handleSafely(message);
       if (outcome === "retry_scheduled") {
@@ -129,9 +134,23 @@ export class SqsConsumer {
   // A visibilidade é contada a partir do recebimento, e as mensagens de uma wallet vão uma por vez. Se as
   // primeiras demoraram esperando o lock, a próxima pode não caber no que sobrou: começar mesmo assim
   // deixaria a mensagem voltar para a fila no meio, outra instância pegá-la, e o recebimento contar à toa.
-  private fitsInVisibility(receivedAt: number): boolean {
-    const elapsedMilliseconds = performance.now() - receivedAt;                                 // quanto do prazo já foi gasto
+  private fitsInVisibility(visibilityStartedAt: number): boolean {
+    const elapsedMilliseconds = performance.now() - visibilityStartedAt;                        // quanto do prazo já foi gasto
     return elapsedMilliseconds + this.settings.longestMessageMilliseconds <= this.settings.visibilityTimeoutMilliseconds;   // cabe mais uma espera inteira?
+  }
+
+  // Estender o prazo não faz o SQS entregar a mensagem de novo, então não gasta recebimento. Devolver com
+  // visibilidade 0 gastaria um, e sob disputa forte as últimas do lote chegariam ao maxReceiveCount.
+  private async extendVisibility(messages: ReceivedMessage[]): Promise<boolean> {
+    const fullVisibilitySeconds = Math.floor(this.settings.visibilityTimeoutMilliseconds / 1_000);   // o prazo cheio da fila, em segundos
+    try {
+      for (const message of messages) await this.queue.changeVisibility(message, fullVisibilitySeconds);
+    } catch (error) {
+      logger.warn({ event: "sqs_visibility_extension_failed", ...errorSummary(error) }, "não deu para estender o prazo de visibilidade; as mensagens que faltam do grupo voltam para a fila");
+      return false;
+    }
+    logger.info({ event: "sqs_visibility_extended", extended: messages.length, visibilitySeconds: fullVisibilitySeconds }, "o prazo de visibilidade não cabia mais uma espera inteira; estendido para as mensagens que faltam do grupo");
+    return true;
   }
 
   private async releaseVisibility(messages: ReceivedMessage[]): Promise<void> {

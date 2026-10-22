@@ -130,7 +130,7 @@ describe("fila", () => {
 
   // Visibilidade de 3 s e statement_timeout de 2,5 s nos testes: só cabe começar uma mensagem até 0,5 s
   // depois do recebimento. A primeira do lote espera o lock por 1 s; as outras três já não cabem.
-  test("lote da mesma wallet com a wallet travada por fora: as mensagens que não cabem mais no prazo de visibilidade voltam com visibilidade 0 e são processadas no recebimento seguinte", async () => {
+  test("lote da mesma wallet com a wallet travada por fora: o prazo das mensagens que não cabem mais é estendido, e as quatro são processadas no mesmo recebimento", async () => {
     const { walletId, playerId } = await createWallet(app.baseUrl, "100.00");
     touchedWallets.push(walletId);
     const batchQueues = await createTestQueues("visibility");                                  // fila própria: o consumidor do arquivo não pega este lote
@@ -178,14 +178,14 @@ describe("fila", () => {
 
     const firstBatch = receives[0]!;
     expect(firstBatch.messages).toHaveLength(4);                                                // o lote inteiro da mesma wallet num recebimento
-    const laterIds = firstBatch.messages.slice(1).map((message) => message.id);
-    expect(visibilityChanges.map((change) => change.id)).toEqual(laterIds);                     // só as três que não começaram
-    for (const change of visibilityChanges) {
-      expect(change.seconds).toBe(0);                                                           // voltam na hora, não com backoff
-      expect(change.at - firstBatch.at).toBeLessThan(3_000);                                    // antes de a visibilidade vencer sozinha
-    }
-    const secondReceiveCounts = receives.slice(1).flatMap((batch) => batch.messages).filter((message) => laterIds.includes(message.id)).map((message) => message.receiveCount);
-    expect(secondReceiveCounts).toEqual([2, 2, 2]);                                             // recebidas de novo uma vez cada, e processadas
+    const batchIds = firstBatch.messages.map((message) => message.id);
+    const receiveCounts = receives.flatMap((batch) => batch.messages).filter((message) => batchIds.includes(message.id)).map((message) => message.receiveCount);
+    expect(receiveCounts).toEqual([1, 1, 1, 1]);                                                // nenhuma recebida de novo: nenhum recebimento gasto
+    expect(visibilityChanges.filter((change) => change.seconds === 0)).toHaveLength(0);         // nenhuma devolvida
+    const extensions = visibilityChanges.filter((change) => change.seconds === 3);              // prazo cheio da fila de teste
+    expect(extensions.length).toBeGreaterThanOrEqual(1);
+    expect(extensions.slice(0, 3).map((change) => change.id)).toEqual(batchIds.slice(1));       // a primeira extensão cobre as três que não tinham começado
+    expect(extensions[0]!.at - firstBatch.at).toBeLessThan(3_000);                              // antes de a visibilidade vencer sozinha
     const [counts] = await testSql()`select count(*)::int as total from wager_transactions where external_transaction_id in ${testSql()(externalIds)}`;
     expect(counts.total).toBe(4);                                                               // uma transação por mensagem
     const [wallet] = await testSql()`select balance from wallets where id = ${walletId}`;
