@@ -9,8 +9,8 @@
 import type { InferEntity } from "@mikro-orm/postgresql";                                    // tipo da linha a partir do registro
 import { LockMode } from "@mikro-orm/postgresql";                                              // SKIP LOCKED dos publishers
 import type { InboxRepository, OutboxRepository, OutboxStats } from "../../application/ports";
-import { InboxMessage } from "../../domain/inbox-message";
-import { OutboxMessage } from "../../domain/outbox-message";
+import { InboxMessage } from "../../domain/messaging/inbox-message";
+import { OutboxMessage } from "../../domain/messaging/outbox-message";
 import type { MikroOrmDatabase } from "./database";
 import { InboxMessageRecord, OutboxMessageRecord } from "./records";
 

@@ -3,18 +3,18 @@
 // ====================================================================================================
 // Saldo inicial maior que zero gera a transação interna OPENING, o lançamento CREDIT e os eventos
 // WagerTransactionProcessed e WalletBalanceChanged, tudo no mesmo commit.
-import { WagerTransactionProcessed, WalletBalanceChanged } from "../domain/events";             // eventos do OPENING
-import type { Money } from "../domain/money";
-import { OutboxMessage } from "../domain/outbox-message";                                       // eventos no mesmo commit
-import { Wallet } from "../domain/wallet";                                                      // aggregate
-import { WagerTransaction } from "../domain/wager-transaction";                                 // OPENING
-import { addToLogContext } from "../observability/log-context";
-import { logger } from "../observability/logger";
-import { transactionsTotal } from "../observability/metrics";
-import { WalletAlreadyExistsError } from "./errors";                                            // 409
-import { uniqueViolationConstraint } from "./infrastructure-errors";
-import { computeOpeningPayloadHash } from "./payload-hash";                                     // hash do OPENING
-import type { Clock, IdGenerator, Repositories, TransactionRunner } from "./ports";
+import { WagerTransactionProcessed, WalletBalanceChanged } from "../../domain/events";          // eventos do OPENING
+import type { Money } from "../../domain/money";
+import { OutboxMessage } from "../../domain/messaging/outbox-message";                          // eventos no mesmo commit
+import { Wallet } from "../../domain/wallet/wallet";                                            // aggregate
+import { WagerTransaction } from "../../domain/wagering/wager-transaction";                     // OPENING
+import { addToLogContext } from "../../observability/log-context";
+import { logger } from "../../observability/logger";
+import { transactionsTotal } from "../../observability/metrics";
+import { WalletAlreadyExistsError } from "../errors";                                           // 409
+import { uniqueViolationConstraint } from "../infrastructure-errors";
+import { computeOpeningPayloadHash } from "../wagering/payload-hash";                           // hash do OPENING
+import type { Clock, IdGenerator, Repositories, TransactionRunner } from "../ports";
 
 export interface CreateWalletCommand {
   playerId: string;

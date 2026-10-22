@@ -3,10 +3,10 @@
 // ====================================================================================================
 // Qualquer falha vira 400 VALIDATION_ERROR no HTTP e DLQ na fila, com nada gravado. Campo desconhecido
 // é rejeitado, para um erro de digitação não passar em silêncio.
-import { InvalidMoneyError } from "../domain/errors";                                           // formato de valor
-import { Money } from "../domain/money";                                                        // valor exato
-import { WagerTransactionKind } from "../domain/wager-transaction";                             // tipos aceitos
-import type { FieldError } from "./errors";                                                     // erro por campo
+import { InvalidMoneyError } from "../../domain/errors";                                        // formato de valor
+import { Money } from "../../domain/money";                                                     // valor exato
+import { WagerTransactionKind } from "../../domain/wagering/wager-transaction";                 // tipos aceitos
+import type { FieldError } from "../errors";                                                    // erro por campo
 
 export interface WagerCommand {
   providerId: string;

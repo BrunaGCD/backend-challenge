@@ -5,7 +5,7 @@ import "reflect-metadata";                                                      
 import { Inject, Injectable, Module, type BeforeApplicationShutdown, type INestApplication, type LoggerService, type OnApplicationShutdown } from "@nestjs/common";
 import { APP_GUARD, NestFactory, Reflector } from "@nestjs/core";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { isValidCorrelationId } from "../../application/wager-command";                         // o mesmo formato aceito na fila
+import { isValidCorrelationId } from "../../application/wagering/wager-command";                // o mesmo formato aceito na fila
 import { stopBackgroundWork, type Application } from "../../composition";
 import { runWithLogContext } from "../../observability/log-context";
 import { logger } from "../../observability/logger";

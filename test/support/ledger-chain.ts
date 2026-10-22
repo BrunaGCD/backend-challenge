@@ -4,7 +4,7 @@
 // Usado nos testes de unidade da Wallet (com os lançamentos devolvidos por debit/credit) e, pelo
 // verificador do banco, nos testes de integração e concorrência.
 import { Money } from "../../src/domain/money";                                                 // soma exata
-import { LedgerDirection, type WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";  // lançamentos
+import { LedgerDirection, type WalletLedgerEntry } from "../../src/domain/wallet/wallet-ledger-entry"; // lançamentos
 
 export function ledgerChainProblems(currentBalance: Money, entries: WalletLedgerEntry[]): string[] {
   const problems: string[] = [];

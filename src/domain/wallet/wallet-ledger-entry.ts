@@ -2,8 +2,8 @@
 //                         LANÇAMENTO DO LEDGER: IMUTÁVEL POR CONSTRUÇÃO
 // ====================================================================================================
 // Sem campo mutável e sem método de transição. A factory confere a aritmética antes de deixar nascer.
-import { InvalidLedgerEntryError } from "./errors";                                             // aritmética ou campos inválidos
-import { Money } from "./money";                                                                // valores exatos
+import { InvalidLedgerEntryError } from "../errors";                                            // aritmética ou campos inválidos
+import { Money } from "../money";                                                               // valores exatos
 
 export enum LedgerDirection {
   Debit = "DEBIT",

@@ -5,13 +5,13 @@
 // o hash esperado foi calculado fora do projeto, com o sha256sum do Git Bash, sobre esse mesmo texto.
 import { describe, expect, test } from "bun:test";
 import canonicalize from "canonicalize";
-import { canonicalPayload, computeOpeningPayloadHash, computePayloadHash } from "../../src/application/payload-hash";
-import { parseWagerCommand, type WagerCommand } from "../../src/application/wager-command";
+import { canonicalPayload, computeOpeningPayloadHash, computePayloadHash } from "../../src/application/wagering/payload-hash";
+import { parseWagerCommand, type WagerCommand } from "../../src/application/wagering/wager-command";
 import { Money } from "../../src/domain/money";
 import { IdempotencyKeyConflictError } from "../../src/application/errors";
 import type { Repositories } from "../../src/application/ports";
-import { ProcessWagerTransaction } from "../../src/application/process-wager-transaction";
-import { WagerTransaction } from "../../src/domain/wager-transaction";
+import { ProcessWagerTransaction } from "../../src/application/wagering/process-wager-transaction";
+import { WagerTransaction } from "../../src/domain/wagering/wager-transaction";
 
 const SPEC_EXAMPLE = {
   providerId: "provider-a",

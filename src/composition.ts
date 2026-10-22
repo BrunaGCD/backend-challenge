@@ -6,10 +6,10 @@
 // continuam reais.
 import type { SQSClient } from "@aws-sdk/client-sqs";
 import type { MikroORM } from "@mikro-orm/postgresql";
-import { CreateWallet } from "./application/create-wallet";
-import { OutboxPublisher } from "./application/outbox-publisher";
+import { CreateWallet } from "./application/wallet/create-wallet";
+import { OutboxPublisher } from "./application/messaging/outbox-publisher";
 import type { Clock, EventPublisher, IdGenerator, RandomSource, Repositories } from "./application/ports";
-import { ProcessWagerTransaction } from "./application/process-wager-transaction";
+import { ProcessWagerTransaction } from "./application/wagering/process-wager-transaction";
 import { WalletQueries } from "./application/queries";
 import { intervalMilliseconds, type AppConfig } from "./config";
 import type { RetryPolicy } from "./domain/backoff";

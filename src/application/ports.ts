@@ -3,12 +3,12 @@
 // ====================================================================================================
 // A aplicação só conhece estas interfaces; as implementações (MikroORM, SQS, relógio do sistema)
 // ficam na infraestrutura e entram pela composição. É por aqui que os testes injetam falhas.
-import type { InboxMessage } from "../domain/inbox-message";
+import type { InboxMessage } from "../domain/messaging/inbox-message";
 import type { Money } from "../domain/money";
-import type { OutboxMessage } from "../domain/outbox-message";
-import type { Wallet } from "../domain/wallet";
-import type { WalletLedgerEntry } from "../domain/wallet-ledger-entry";
-import type { WagerTransaction } from "../domain/wager-transaction";
+import type { OutboxMessage } from "../domain/messaging/outbox-message";
+import type { Wallet } from "../domain/wallet/wallet";
+import type { WalletLedgerEntry } from "../domain/wallet/wallet-ledger-entry";
+import type { WagerTransaction } from "../domain/wagering/wager-transaction";
 
 export interface Clock {
   now(): Date;

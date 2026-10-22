@@ -4,11 +4,11 @@
 // Regras da seção 7 do desafio num lugar só. Recebe a wallet já travada e a referência já buscada; muda o estado
 // da transação e da wallet em memória e devolve o lançamento, se houve movimento. Quem grava é o caso
 // de uso, dentro da mesma transação SQL.
-import type { RetryPolicy } from "./backoff";                                                   // reagendamento das pendentes
-import { InsufficientFundsError } from "./errors";                                              // débito maior que o saldo
+import type { RetryPolicy } from "../backoff";                                                  // reagendamento das pendentes
+import { InsufficientFundsError } from "../errors";                                             // débito maior que o saldo
 import { FailureCode } from "./failure-code";                                                   // motivos de rejeição
-import type { Wallet } from "./wallet";                                                         // saldo travado
-import { LedgerDirection, type WalletLedgerEntry } from "./wallet-ledger-entry";                 // lançamento gerado
+import type { Wallet } from "../wallet/wallet";                                                 // saldo travado
+import { LedgerDirection, type WalletLedgerEntry } from "../wallet/wallet-ledger-entry";         // lançamento gerado
 import { WagerTransactionKind, WagerTransactionStatus, type WagerTransaction } from "./wager-transaction";
 
 export interface SettlementInput {

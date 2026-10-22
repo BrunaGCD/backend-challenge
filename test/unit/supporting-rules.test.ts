@@ -8,9 +8,9 @@ import { loadConfig } from "../../src/config";                                  
 import { decodeLedgerCursor, encodeLedgerCursor } from "../../src/application/queries";
 import { fullJitterDelayMilliseconds } from "../../src/domain/backoff";
 import { WagerTransactionProcessed, WalletBalanceChanged } from "../../src/domain/events";
-import { InboxMessage } from "../../src/domain/inbox-message";
-import { OutboxMessage } from "../../src/domain/outbox-message";
-import { LedgerDirection } from "../../src/domain/wallet-ledger-entry";
+import { InboxMessage } from "../../src/domain/messaging/inbox-message";
+import { OutboxMessage } from "../../src/domain/messaging/outbox-message";
+import { LedgerDirection } from "../../src/domain/wallet/wallet-ledger-entry";
 import { NOW, newTransaction, openWallet } from "../support/domain-fixtures";
 
 describe("backoff exponencial com full jitter", () => {

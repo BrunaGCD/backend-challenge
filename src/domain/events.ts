@@ -3,11 +3,11 @@
 // ====================================================================================================
 // Envelope abstrato e uma subclasse por evento: eventType e version ficam no tipo, não numa string
 // solta no call site. data carrega MoneyProps (string decimal), nunca a instância de Money.
-import type { FailureCode } from "./failure-code";                                              // motivo de rejeição ou falha
+import type { FailureCode } from "./wagering/failure-code";                                     // motivo de rejeição ou falha
 import type { MoneyProps } from "./money";                                                      // dinheiro serializado
-import type { Wallet } from "./wallet";                                                         // dona do evento de saldo
-import type { LedgerDirection, WalletLedgerEntry } from "./wallet-ledger-entry";                 // movimento do saldo
-import type { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "./wager-transaction";
+import type { Wallet } from "./wallet/wallet";                                                  // dona do evento de saldo
+import type { LedgerDirection, WalletLedgerEntry } from "./wallet/wallet-ledger-entry";          // movimento do saldo
+import type { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "./wagering/wager-transaction";
 
 export interface IntegrationEventProps<T> {
   eventId: string;

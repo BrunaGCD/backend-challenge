@@ -5,9 +5,9 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { IdempotencyKeyMissingError, ValidationError, type FieldError } from "../../application/errors";
-import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, readMoney, readUuid, rejectUnknownFields, UUID_PATTERN } from "../../application/wager-command";
-import type { CreateWallet } from "../../application/create-wallet";
-import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
+import { isPlainObject, isValidIdempotencyKey, parseWagerCommand, readMoney, readUuid, rejectUnknownFields, UUID_PATTERN } from "../../application/wagering/wager-command";
+import type { CreateWallet } from "../../application/wallet/create-wallet";
+import type { ProcessWagerTransaction } from "../../application/wagering/process-wager-transaction";
 import type { WalletQueries } from "../../application/queries";
 import type { Readiness } from "../../composition";
 import { metricsRegistry } from "../../observability/metrics";

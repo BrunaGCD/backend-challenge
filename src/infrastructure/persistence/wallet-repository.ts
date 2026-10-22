@@ -9,7 +9,7 @@ import { LockMode } from "@mikro-orm/postgresql";                               
 import { ConcurrentUpdateError } from "../../application/errors";                               // versão diferente da que o domínio viu é bug
 import type { WalletRepository } from "../../application/ports";
 import { Money } from "../../domain/money";
-import { Wallet } from "../../domain/wallet";
+import { Wallet } from "../../domain/wallet/wallet";
 import { walletLockWaitSeconds } from "../../observability/metrics";                            // tempo esperando o lock
 import type { MikroOrmDatabase } from "./database";
 import { WalletRecord } from "./records";

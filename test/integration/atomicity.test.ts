@@ -6,9 +6,9 @@
 // antes do commit. Banco e fila continuam reais.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Repositories } from "../../src/application/ports";
-import type { WagerCommand } from "../../src/application/wager-command";
+import type { WagerCommand } from "../../src/application/wagering/wager-command";
 import { Money } from "../../src/domain/money";
-import { WagerTransactionKind } from "../../src/domain/wager-transaction";
+import { WagerTransactionKind } from "../../src/domain/wagering/wager-transaction";
 import { createTestQueues, createWallet, drainQueue, startInProcessApp, submitWager, testConfig, testSql, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";
 

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";                                             // runner de testes
-import { FailureCode } from "../../src/domain/failure-code";                                    // motivos
-import { settleWagerTransaction } from "../../src/domain/wager-settlement";                     // regras da seção 7 do desafio
-import type { Wallet } from "../../src/domain/wallet";                                          // wallet travada
-import { LedgerDirection, type WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";                // lançamentos
-import { WagerTransactionKind as Kind, WagerTransactionStatus as Status, type WagerTransaction } from "../../src/domain/wager-transaction";
+import { FailureCode } from "../../src/domain/wagering/failure-code";                           // motivos
+import { settleWagerTransaction } from "../../src/domain/wagering/wager-settlement";            // regras da seção 7 do desafio
+import type { Wallet } from "../../src/domain/wallet/wallet";                                   // wallet travada
+import { LedgerDirection, type WalletLedgerEntry } from "../../src/domain/wallet/wallet-ledger-entry";         // lançamentos
+import { WagerTransactionKind as Kind, WagerTransactionStatus as Status, type WagerTransaction } from "../../src/domain/wagering/wager-transaction";
 import { FIXED_RETRY_POLICY, NOW, OTHER_PLAYER_ID, brl, newTransaction, nextId, openWallet } from "../support/domain-fixtures";
 import { ledgerChainProblems } from "../support/ledger-chain";                                  // invariante final
 

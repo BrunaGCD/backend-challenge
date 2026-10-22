@@ -3,21 +3,21 @@
 // ====================================================================================================
 // O mesmo fluxo atende os três canais. A garantia vem do banco (seção 8 do desafio): lock da wallet,
 // UNIQUE da idempotency_key e de (provider_id, external_transaction_id), inbox e outbox no mesmo commit.
-import type { RetryPolicy } from "../domain/backoff";                                           // backoff das pendentes
-import { WagerTransactionFailed, WagerTransactionPendingReference, WagerTransactionProcessed, WagerTransactionRejected, WalletBalanceChanged, type EventContext, type IntegrationEvent } from "../domain/events";
-import { FailureCode } from "../domain/failure-code";                                           // PROCESSING_FAILED
-import { InboxMessage } from "../domain/inbox-message";                                         // dedup da fila
-import { OutboxMessage } from "../domain/outbox-message";                                       // eventos no mesmo commit
-import type { Wallet } from "../domain/wallet";
-import { settleWagerTransaction, type SettlementOutcome } from "../domain/wager-settlement";   // regras de negócio
-import { WagerTransaction, WagerTransactionStatus } from "../domain/wager-transaction";
-import { logger, errorSummary } from "../observability/logger";                                 // logs sem valores
-import { addToLogContext, runWithLogContext } from "../observability/log-context";              // ids no contexto
-import { concurrencyConflictsTotal, duplicatesTotal, idempotencyConflictsTotal, processingDurationSeconds, retriesTotal, transactionsTotal } from "../observability/metrics";
-import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, WalletNotFoundError } from "./errors";
-import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "./infrastructure-errors";
+import type { RetryPolicy } from "../../domain/backoff";                                        // backoff das pendentes
+import { WagerTransactionFailed, WagerTransactionPendingReference, WagerTransactionProcessed, WagerTransactionRejected, WalletBalanceChanged, type EventContext, type IntegrationEvent } from "../../domain/events";
+import { FailureCode } from "../../domain/wagering/failure-code";                               // PROCESSING_FAILED
+import { InboxMessage } from "../../domain/messaging/inbox-message";                            // dedup da fila
+import { OutboxMessage } from "../../domain/messaging/outbox-message";                          // eventos no mesmo commit
+import type { Wallet } from "../../domain/wallet/wallet";
+import { settleWagerTransaction, type SettlementOutcome } from "../../domain/wagering/wager-settlement"; // regras de negócio
+import { WagerTransaction, WagerTransactionStatus } from "../../domain/wagering/wager-transaction";
+import { logger, errorSummary } from "../../observability/logger";                              // logs sem valores
+import { addToLogContext, runWithLogContext } from "../../observability/log-context";           // ids no contexto
+import { concurrencyConflictsTotal, duplicatesTotal, idempotencyConflictsTotal, processingDurationSeconds, retriesTotal, transactionsTotal } from "../../observability/metrics";
+import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, WalletNotFoundError } from "../errors";
+import { concurrencyConflictType, isTransientInfrastructureError, uniqueViolationConstraint } from "../infrastructure-errors";
 import { computePayloadHash } from "./payload-hash";                                            // hash do comando
-import type { Clock, IdGenerator, Repositories, TransactionRunner } from "./ports";
+import type { Clock, IdGenerator, Repositories, TransactionRunner } from "../ports";
 import type { WagerCommand } from "./wager-command";
 
 export type Channel = "http" | "sqs" | "pending_worker";

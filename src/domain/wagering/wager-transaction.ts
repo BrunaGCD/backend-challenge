@@ -4,11 +4,11 @@
 // Nasce em PENDING (só em memória) e sai dele antes do commit. PROCESSED, REJECTED e FAILED são
 // terminais: tentar sair deles é erro de programação, não caminho de negócio. A forma segue o
 // esqueleto da seção 6.3 do desafio: identidade e negócio readonly, e só o estado da decisão privado e mutável.
-import { fullJitterDelayMilliseconds, type RetryPolicy } from "./backoff";                     // reagendamento do worker
-import { InvalidTransactionStateError, InvalidWagerTransactionError } from "./errors";          // estado e criação inválidos
+import { fullJitterDelayMilliseconds, type RetryPolicy } from "../backoff";                    // reagendamento do worker
+import { InvalidTransactionStateError, InvalidWagerTransactionError } from "../errors";         // estado e criação inválidos
 import { FailureCode } from "./failure-code";                                                   // motivo de rejeição ou falha
-import { Money } from "./money";                                                                // valor exato
-import { LedgerDirection } from "./wallet-ledger-entry";                                        // débito ou crédito
+import { Money } from "../money";                                                               // valor exato
+import { LedgerDirection } from "../wallet/wallet-ledger-entry";                                // débito ou crédito
 
 export enum WagerTransactionKind {
   Opening = "OPENING",                                                                          // interno: crédito de abertura da wallet

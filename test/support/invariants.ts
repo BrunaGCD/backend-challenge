@@ -9,7 +9,7 @@
 import { expect } from "bun:test";
 import type { SQL } from "bun";
 import { Money } from "../../src/domain/money";
-import { LedgerDirection, WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";
+import { LedgerDirection, WalletLedgerEntry } from "../../src/domain/wallet/wallet-ledger-entry";
 import { testSql } from "./harness";
 import { ledgerChainProblems } from "./ledger-chain";
 

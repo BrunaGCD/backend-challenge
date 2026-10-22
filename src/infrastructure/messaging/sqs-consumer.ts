@@ -12,8 +12,8 @@
 // tentando de novo não segura as outras. O FIFO não entrega outra mensagem de um grupo em mãos.
 import { ExternalTransactionIdConflictError, IdempotencyKeyConflictError, InboxPayloadConflictError, ValidationError, WalletNotFoundError, type ApplicationError, type FieldError } from "../../application/errors";
 import { isDatabaseUnavailableError } from "../../application/infrastructure-errors";            // banco fora ou sem conexão livre
-import type { ProcessWagerTransaction } from "../../application/process-wager-transaction";
-import { isPlainObject, isValidCorrelationId, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields, type WagerCommand } from "../../application/wager-command";
+import type { ProcessWagerTransaction } from "../../application/wagering/process-wager-transaction";
+import { isPlainObject, isValidCorrelationId, isValidIdempotencyKey, parseWagerCommand, rejectUnknownFields, type WagerCommand } from "../../application/wagering/wager-command";
 import { fullJitterDelayMilliseconds, type RetryPolicy } from "../../domain/backoff";          // backoff comum
 import { runWithLogContext } from "../../observability/log-context";
 import { errorSummary, logger } from "../../observability/logger";

@@ -7,14 +7,14 @@
 // e a violação de unicidade que aparece no flush continua levando à recuperação das cópias.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ConcurrentUpdateError } from "../../src/application/errors";
-import { computeOpeningPayloadHash } from "../../src/application/payload-hash";
+import { computeOpeningPayloadHash } from "../../src/application/wagering/payload-hash";
 import type { Repositories } from "../../src/application/ports";
 import { WagerTransactionProcessed, WalletBalanceChanged } from "../../src/domain/events";
-import { FailureCode } from "../../src/domain/failure-code";
+import { FailureCode } from "../../src/domain/wagering/failure-code";
 import { Money } from "../../src/domain/money";
-import { OutboxMessage } from "../../src/domain/outbox-message";
-import { Wallet } from "../../src/domain/wallet";
-import { WagerTransaction, WagerTransactionStatus } from "../../src/domain/wager-transaction";
+import { OutboxMessage } from "../../src/domain/messaging/outbox-message";
+import { Wallet } from "../../src/domain/wallet/wallet";
+import { WagerTransaction, WagerTransactionStatus } from "../../src/domain/wagering/wager-transaction";
 import { WalletRecord } from "../../src/infrastructure/persistence/records";
 import { createTestQueues, createWallet, httpRequest, startInProcessApp, submitWager, testConfig, testSql, type RunningApp, type TestQueues } from "../support/harness";
 import { expectWalletInvariants } from "../support/invariants";

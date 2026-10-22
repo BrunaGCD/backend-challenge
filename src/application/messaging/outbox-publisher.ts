@@ -4,10 +4,10 @@
 // BEGIN; até 10 linhas vencidas com FOR UPDATE SKIP LOCKED; SendMessageBatch; marca publicadas ou
 // reagenda as recusadas; COMMIT. A única duplicação possível é publicar e morrer antes do COMMIT:
 // a cópia tem o mesmo eventId, o SQS descarta dentro de 5 minutos e o consumidor deduplica por eventId.
-import type { RetryPolicy } from "../domain/backoff";
-import { logger } from "../observability/logger";
-import { outboxPublishDelaySeconds, retriesTotal } from "../observability/metrics";
-import type { Clock, EventPublisher, OutboxRepository, TransactionRunner } from "./ports";
+import type { RetryPolicy } from "../../domain/backoff";
+import { logger } from "../../observability/logger";
+import { outboxPublishDelaySeconds, retriesTotal } from "../../observability/metrics";
+import type { Clock, EventPublisher, OutboxRepository, TransactionRunner } from "../ports";
 
 export interface OutboxPublisherSettings {
   batchSize: number;

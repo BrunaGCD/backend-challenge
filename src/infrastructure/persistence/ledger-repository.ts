@@ -6,7 +6,7 @@
 import type { InferEntity } from "@mikro-orm/postgresql";                                    // tipo da linha a partir do registro
 import type { LedgerRepository, ReconciliationRow } from "../../application/ports";
 import { Money } from "../../domain/money";
-import { LedgerDirection, WalletLedgerEntry } from "../../domain/wallet-ledger-entry";
+import { LedgerDirection, WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
 import type { MikroOrmDatabase } from "./database";
 import { WalletLedgerEntryRecord } from "./records";
 

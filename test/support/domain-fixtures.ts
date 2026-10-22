@@ -2,8 +2,8 @@
 //                         PEÇAS DE DOMÍNIO PRONTAS PARA OS TESTES DE UNIDADE
 // ====================================================================================================
 import { Money } from "../../src/domain/money";                                                 // valores
-import { Wallet } from "../../src/domain/wallet";                                               // wallet aberta
-import { WagerTransaction, WagerTransactionKind } from "../../src/domain/wager-transaction";    // transações de provedor
+import { Wallet } from "../../src/domain/wallet/wallet";                                        // wallet aberta
+import { WagerTransaction, WagerTransactionKind } from "../../src/domain/wagering/wager-transaction"; // transações de provedor
 import type { RetryPolicy } from "../../src/domain/backoff";                                    // backoff determinístico
 
 export const PLAYER_ID = "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1";

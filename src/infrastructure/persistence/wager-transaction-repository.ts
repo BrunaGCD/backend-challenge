@@ -10,9 +10,9 @@ import type { InferEntity } from "@mikro-orm/postgresql";                       
 import { LockMode } from "@mikro-orm/postgresql";                                              // FOR UPDATE e SKIP LOCKED
 import { ConcurrentUpdateError } from "../../application/errors";                               // pendente que já não está pendente
 import type { WagerTransactionRepository } from "../../application/ports";
-import type { FailureCode } from "../../domain/failure-code";
+import type { FailureCode } from "../../domain/wagering/failure-code";
 import { Money } from "../../domain/money";
-import { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "../../domain/wager-transaction";
+import { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "../../domain/wagering/wager-transaction";
 import type { MikroOrmDatabase } from "./database";
 import { WagerTransactionRecord } from "./records";
 

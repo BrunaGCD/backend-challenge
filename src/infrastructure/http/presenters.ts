@@ -2,9 +2,9 @@
 //                       FORMATO DAS RESPOSTAS HTTP E O STATUS DE CADA SITUAÇÃO
 // ====================================================================================================
 import type { ReconciliationResult } from "../../application/queries";
-import type { Wallet } from "../../domain/wallet";
-import type { WalletLedgerEntry } from "../../domain/wallet-ledger-entry";
-import { WagerTransactionStatus, type WagerTransaction } from "../../domain/wager-transaction";
+import type { Wallet } from "../../domain/wallet/wallet";
+import type { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
+import { WagerTransactionStatus, type WagerTransaction } from "../../domain/wagering/wager-transaction";
 
 export function presentWallet(wallet: Wallet, includeUpdatedAt: boolean) {
   const body: Record<string, unknown> = { id: wallet.id, playerId: wallet.playerId, balance: wallet.balance.toJSON(), version: wallet.version };

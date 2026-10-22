@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";                                             // runner de testes
 import { InvalidTransactionStateError, InvalidWagerTransactionError } from "../../src/domain/errors";
-import { FailureCode } from "../../src/domain/failure-code";                                    // motivos
+import { FailureCode } from "../../src/domain/wagering/failure-code";                           // motivos
 import { Money } from "../../src/domain/money";                                                 // valores
-import { LedgerDirection } from "../../src/domain/wallet-ledger-entry";                         // direção
-import { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "../../src/domain/wager-transaction";
+import { LedgerDirection } from "../../src/domain/wallet/wallet-ledger-entry";                  // direção
+import { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "../../src/domain/wagering/wager-transaction";
 import { brl, FIXED_RETRY_POLICY, NOW, newTransaction, WALLET_ID, PLAYER_ID } from "../support/domain-fixtures";
 
 const later = new Date(NOW.getTime() + 1000);

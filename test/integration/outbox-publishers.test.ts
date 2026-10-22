@@ -3,7 +3,7 @@
 // ====================================================================================================
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { EventPublisher } from "../../src/application/ports";
-import type { OutboxMessage } from "../../src/domain/outbox-message";
+import type { OutboxMessage } from "../../src/domain/messaging/outbox-message";
 import { SendMessageBatchCommand } from "@aws-sdk/client-sqs";                                 // a cópia publicada depois da janela de deduplicação
 import { consumeEventsUntilIdle, createExampleConsumerTables, movedTotal } from "../support/example-event-consumer";
 import { createTestQueues, createWallet, drainQueue, queueUrl, startInProcessApp, submitWager, testConfig, testSql, testSqsClient, waitUntil, type RunningApp, type TestQueues } from "../support/harness";

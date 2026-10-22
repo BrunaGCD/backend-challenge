@@ -6,7 +6,7 @@ import {
   ChangeMessageVisibilityCommand, SendMessageCommand, SendMessageBatchCommand, type Message,
 } from "@aws-sdk/client-sqs";                                                                   // SDK oficial da AWS
 import type { EventPublisher, PublishOutcome } from "../../application/ports";
-import type { OutboxMessage } from "../../domain/outbox-message";
+import type { OutboxMessage } from "../../domain/messaging/outbox-message";
 
 export interface SqsSettings {
   endpoint: string;

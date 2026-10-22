@@ -6,7 +6,7 @@
 // chegando uma vez por HTTP e outra pela fila dá o mesmo hash (é replay).
 import { createHash } from "node:crypto";                                                       // SHA-256
 import canonicalize from "canonicalize";                                                        // JCS, do autor da RFC 8785
-import type { Money } from "../domain/money";                                                   // valor serializado pelo toJSON
+import type { Money } from "../../domain/money";                                                // valor serializado pelo toJSON
 import type { WagerCommand } from "./wager-command";                                            // comando validado
 
 function sha256Hex(text: string): string {

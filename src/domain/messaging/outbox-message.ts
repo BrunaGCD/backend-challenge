@@ -3,8 +3,8 @@
 // ====================================================================================================
 // O id é o eventId. Sem limite de tentativas: descartar um evento quebraria "não perder eventos
 // confirmados"; depois de muitas tentativas o publisher só avisa (log e métrica) e continua tentando.
-import { fullJitterDelayMilliseconds, type RetryPolicy } from "./backoff";                     // espera entre tentativas
-import type { IntegrationEvent } from "./events";                                               // evento a publicar
+import { fullJitterDelayMilliseconds, type RetryPolicy } from "../backoff";                    // espera entre tentativas
+import type { IntegrationEvent } from "../events";                                              // evento a publicar
 
 export interface OutboxMessageState {
   id: string;

@@ -3,8 +3,8 @@
 // ====================================================================================================
 // debit e credit devolvem o lançamento junto com a mudança de saldo, então não existe caminho para
 // mexer num sem o outro. version começa em 1 e só sobe quando o saldo muda.
-import { CurrencyMismatchError, InsufficientFundsError, InvalidWalletError } from "./errors";   // violações da wallet
-import { Money } from "./money";                                                                // saldo exato
+import { CurrencyMismatchError, InsufficientFundsError, InvalidWalletError } from "../errors";  // violações da wallet
+import { Money } from "../money";                                                               // saldo exato
 import { LedgerDirection, WalletLedgerEntry } from "./wallet-ledger-entry";                      // lançamento que nasce junto
 
 export interface WalletState {

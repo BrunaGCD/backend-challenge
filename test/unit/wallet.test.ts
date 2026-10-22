@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";                                             // runner de testes
 import { CurrencyMismatchError, InsufficientFundsError, InvalidLedgerEntryError } from "../../src/domain/errors";
 import { Money } from "../../src/domain/money";                                                 // valores
-import { LedgerDirection, WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";       // lançamentos
+import { LedgerDirection, WalletLedgerEntry } from "../../src/domain/wallet/wallet-ledger-entry"; // lançamentos
 import { brl, NOW, openWallet } from "../support/domain-fixtures";                              // wallet pronta
 import { ledgerChainProblems } from "../support/ledger-chain";                                  // invariante final
 
