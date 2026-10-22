@@ -120,7 +120,7 @@ export function loadConfig(): AppConfig {
       intervalMilliseconds: readInteger("PENDING_WORKER_INTERVAL_MS", 1_000),
       ttlMilliseconds: readInteger("PENDING_REFERENCE_TTL_MS", 600_000),
       retryBaseMilliseconds: readInteger("PENDING_RETRY_BASE_MS", 1_000),
-      retryCapMilliseconds: readInteger("PENDING_RETRY_CAP_MS", 60_000),
+      retryCapMilliseconds: readInteger("PENDING_RETRY_CAP_MS", 10_000),                         // a referência chegou: a pendente espera no máximo isso pela próxima tentativa
     },
     outbox: {
       enabled: readBoolean("OUTBOX_PUBLISHER_ENABLED", true),

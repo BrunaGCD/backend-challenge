@@ -163,6 +163,11 @@ describe("ordem dos timeouts na configuração", () => {
     expect(config.consumer.maxInFlightMessages).toBe(10);                                       // até 10 mensagens em mãos por instância
   });
 
+  test("os padrões das pendentes: base 1 s e teto 10 s, então a referência que chega espera no máximo uns 10 s", () => {
+    const config = loadWith({});
+    expect(config.pendingReference).toMatchObject({ retryBaseMilliseconds: 1000, retryCapMilliseconds: 10_000, intervalMilliseconds: 1000, ttlMilliseconds: 600_000 });
+  });
+
   test("um limite de mensagens em mãos menor que 1 é recusado na subida", () => {
     expect(() => loadWith({ CONSUMER_MAX_IN_FLIGHT_MESSAGES: "0" })).toThrow("CONSUMER_MAX_IN_FLIGHT_MESSAGES precisa ser pelo menos 1");
   });

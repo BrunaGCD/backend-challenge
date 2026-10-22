@@ -71,7 +71,7 @@ describe("WagerTransaction: transições", () => {
     transaction.markPendingReference(brl("50.00"), NOW, FIXED_RETRY_POLICY);
     expect(transaction.status).toBe(WagerTransactionStatus.PendingReference);
     expect(transaction.attempts).toBe(0);
-    expect(transaction.nextAttemptAt).toEqual(new Date(NOW.getTime() + 500));                  // random 0.5 × min(60 s, 1 s × 2^0)
+    expect(transaction.nextAttemptAt).toEqual(new Date(NOW.getTime() + 500));                  // random 0.5 × min(10 s, 1 s × 2^0)
   });
 
   test("PENDING_REFERENCE -> PROCESSED, REJECTED e FAILED", () => {

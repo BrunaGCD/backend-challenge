@@ -10,7 +10,7 @@ export const PLAYER_ID = "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1";
 export const OTHER_PLAYER_ID = "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a2";
 export const WALLET_ID = "0192f291-27dd-7d3f-8071-5f8685deef37";
 export const NOW = new Date("2026-07-29T15:00:00.000Z");
-export const FIXED_RETRY_POLICY: RetryPolicy = { baseMilliseconds: 1000, capMilliseconds: 60_000, random: () => 0.5 };   // metade do teto, sempre
+export const FIXED_RETRY_POLICY: RetryPolicy = { baseMilliseconds: 1000, capMilliseconds: 10_000, random: () => 0.5 };   // metade do teto, sempre
 
 export const brl = (amount: string) => Money.from({ amount, currency: "BRL" });
 
