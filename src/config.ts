@@ -54,6 +54,7 @@ export interface AppConfig {
     gaugeIntervalMilliseconds: number;
   };
   dlqGaugeIntervalMilliseconds: number;
+  backgroundLoopFailureCapMilliseconds: number;   // a maior espera de um laço de fundo depois de falhas seguidas
   acceptedCurrencies: string[];
   ledgerPage: { defaultLimit: number; maxLimit: number };
   logLevel: string;
@@ -131,6 +132,7 @@ export function loadConfig(): AppConfig {
       gaugeIntervalMilliseconds: readInteger("OUTBOX_GAUGE_INTERVAL_MS", 5_000),
     },
     dlqGaugeIntervalMilliseconds: readInteger("DLQ_GAUGE_INTERVAL_MS", 30_000),
+    backgroundLoopFailureCapMilliseconds: readInteger("BACKGROUND_LOOP_FAILURE_CAP_MS", 10_000),   // com o banco fora, no máximo 10 s entre uma tentativa e a próxima
     acceptedCurrencies: readString("ACCEPTED_CURRENCIES", "BRL").split(",").map((currency) => currency.trim()),
     ledgerPage: { defaultLimit: readInteger("LEDGER_PAGE_DEFAULT_LIMIT", 50), maxLimit: readInteger("LEDGER_PAGE_MAX_LIMIT", 100) },
     logLevel: readString("LOG_LEVEL", "info"),

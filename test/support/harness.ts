@@ -89,6 +89,7 @@ export function testEnvironment(queues: TestQueues, extra: Record<string, string
     OUTBOX_RETRY_BASE_MS: "100",
     OUTBOX_RETRY_CAP_MS: "1000",
     OUTBOX_GAUGE_INTERVAL_MS: "500",
+    BACKGROUND_LOOP_FAILURE_CAP_MS: "1000",                                                     // 10 s em produção
     DLQ_GAUGE_INTERVAL_MS: "500",
     DATABASE_POOL_MAX: "10",
     ACCEPTED_CURRENCIES: "BRL,USD",

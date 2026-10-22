@@ -132,13 +132,13 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     backgroundLoops.push(new BackgroundLoop("outbox_publisher", config.outbox.intervalMilliseconds, async () => {
       const taken = await outboxPublisher.publishOnce();
       return taken >= config.outbox.batchSize ? "run_again_now" : "wait";                       // lote cheio: volta na hora
-    }));
+    }, config.backgroundLoopFailureCapMilliseconds));
   }
   if (config.pendingReference.enabled) {
     backgroundLoops.push(new BackgroundLoop("pending_reference_worker", config.pendingReference.intervalMilliseconds, async () => {
       const foundOne = await processWagerInBackground.processNextDuePending();
       return foundOne ? "run_again_now" : "wait";
-    }));
+    }, config.backgroundLoopFailureCapMilliseconds));
   }
   backgroundLoops.push(new BackgroundLoop("outbox_and_pending_gauges", config.outbox.gaugeIntervalMilliseconds, async () => {
     const stats = await repositories.outbox.stats(config.outbox.stuckAfterAttempts);
@@ -147,7 +147,7 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
     outboxLagSeconds.set(stats.oldestOccurredAt ? Math.max(0, (clock.now().getTime() - stats.oldestOccurredAt.getTime()) / 1000) : 0);
     pendingReferenceGauge.set(await repositories.transactions.countPending());
     return "wait";
-  }));
+  }, config.backgroundLoopFailureCapMilliseconds));
   backgroundLoops.push(new BackgroundLoop("dlq_gauge", config.dlqGaugeIntervalMilliseconds, async () => {
     try {
       dlqMessages.set(await approximateNumberOfMessages(sqsClient, queueUrls, config.sqs.deadLetterQueueName));   // conta também o que o próprio SQS moveu
@@ -155,7 +155,7 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
       logger.warn({ event: "dlq_gauge_failed", ...errorSummary(error) }, "não deu para ler o tamanho da DLQ");
     }
     return "wait";
-  }));
+  }, config.backgroundLoopFailureCapMilliseconds));
 
   // ----------------------------------------------------------------------------------------------------
   //                                          READINESS

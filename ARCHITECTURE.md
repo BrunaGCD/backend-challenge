@@ -310,6 +310,8 @@ O destino é `wagering-events.fifo`, com `MessageGroupId = aggregateId` (`wallet
 
 **Logs** em JSON pelo pino ([logger.ts](src/observability/logger.ts)), com um `mixin` lendo um `AsyncLocalStorage` ([log-context.ts](src/observability/log-context.ts)) que guarda `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` do trabalho em andamento, e `redact` como segunda barreira. Nunca vão para log: `playerId`, qualquer valor monetário, corpo de requisição ou de mensagem e o header `Authorization`. O teste de várias instâncias lê a saída dos 3 processos e confere que nenhum `playerId` usado e nenhum campo `"amount"` aparecem, e que todo log de decisão tem os ids. Consequência: diagnosticar um problema de valor exige consultar o banco ou chamar a reconciliação.
 
+Os laços de fundo (publisher da outbox, worker de pendentes e os medidores) não enchem o log numa queda: a primeira falha de uma sequência sai em `background_loop_iteration_failed` (nível `error`) e a volta em `background_loop_recovered`, com quantas iterações falharam e por quanto tempo; entre as duas, a espera dobra a partir do intervalo de cada laço até o teto de 10 s (`BACKGROUND_LOOP_FAILURE_CAP_MS`) e volta ao normal no primeiro sucesso. Antes disso, uma queda de 65 s do PostgreSQL gerava 155 linhas de erro somando as 3 instâncias, uma por intervalo de cada laço. O custo é que, depois que o banco volta, um laço pode levar até esses 10 s para perceber.
+
 **Métricas** pelo prom-client em `GET /metrics` ([metrics.ts](src/observability/metrics.ts)), sem label de alta cardinalidade:
 
 | Exigência | Métrica |
