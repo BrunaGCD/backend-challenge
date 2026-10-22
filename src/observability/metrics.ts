@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                         MÉTRICAS (PROM-CLIENT) DA SEÇÃO 12
+//                           MÉTRICAS (PROM-CLIENT) DA SEÇÃO 12 DO DESAFIO
 // ====================================================================================================
 // Unidade base em segundos, _total nos contadores, e nenhum label de alta cardinalidade (walletId não
 // entra em label). O E1 (item 11) confirmou contador, histograma e o texto do /metrics no Bun.

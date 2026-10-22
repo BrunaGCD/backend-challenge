@@ -1,5 +1,5 @@
 // ====================================================================================================
-//            ERROS EM PROBLEM DETAILS (RFC 9457) COM O CODE DA SEÇÃO 7.2 COMO EXTENSÃO
+//          ERROS EM PROBLEM DETAILS (RFC 9457) COM O CODE COMO EXTENSÃO (ARCHITECTURE §10)
 // ====================================================================================================
 // Se existe uma WagerTransaction, o corpo é a transação (isso é feito no controller). Se não existe,
 // o corpo é um erro neste formato. A mesma situação tem o mesmo status em todos os endpoints.

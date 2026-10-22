@@ -1,7 +1,7 @@
 // ====================================================================================================
 //     CONCORRÊNCIA COM 3 INSTÂNCIAS DE VERDADE: MESMO BANCO, MESMAS FILAS, REQUISIÇÕES AO MESMO TEMPO
 // ====================================================================================================
-// Cenários 1, 2, 3, 4, 6 e 7 da seção 13. Paralelismo real (processos separados), nada de mock.
+// Cenários 1, 2, 3, 4, 6 e 7 da seção 13 do desafio. Paralelismo real (processos separados), nada de mock.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { createTestQueues, createWallet, drainQueue, holdWalletLock, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitLikeProvider, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type ProviderRetryCounter, type TestQueues, type WagerInput } from "../support/harness";

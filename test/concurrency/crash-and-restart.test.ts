@@ -1,7 +1,7 @@
 // ====================================================================================================
 //    CRASH E REINÍCIO: MORTO DEPOIS DO COMMIT E ANTES DO ACK, SIGKILL NO MEIO DA CARGA, E SIGTERM
 // ====================================================================================================
-// Cenários 5 e 8 da seção 13, com processos de verdade e SIGKILL de verdade.
+// Cenários 5 e 8 da seção 13 do desafio, com processos de verdade e SIGKILL de verdade.
 import { afterAll, describe, expect, test } from "bun:test";
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { createTestQueues, createWallet, drainQueue, httpRequest, queueUrl, seededRandom, sendWagerMessage, submitWager, testEnvironment, testSql, testSqsClient, wagerMessage, waitUntil, type HttpResult, type TestQueues, type WagerInput } from "../support/harness";

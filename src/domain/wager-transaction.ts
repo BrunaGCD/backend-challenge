@@ -3,7 +3,7 @@
 // ====================================================================================================
 // Nasce em PENDING (só em memória) e sai dele antes do commit. PROCESSED, REJECTED e FAILED são
 // terminais: tentar sair deles é erro de programação, não caminho de negócio. A forma segue o
-// esqueleto da seção 6.3: identidade e negócio readonly, e só o estado da decisão privado e mutável.
+// esqueleto da seção 6.3 do desafio: identidade e negócio readonly, e só o estado da decisão privado e mutável.
 import { fullJitterDelayMilliseconds, type RetryPolicy } from "./backoff";                     // reagendamento do worker
 import { InvalidTransactionStateError, InvalidWagerTransactionError } from "./errors";          // estado e criação inválidos
 import { FailureCode } from "./failure-code";                                                   // motivo de rejeição ou falha
@@ -200,7 +200,7 @@ export class WagerTransaction {
   }
 
   fail(code: FailureCode, at: Date): void {
-    if (this._status !== WagerTransactionStatus.PendingReference) {                             // PENDING -> FAILED não existe (seção 6.3)
+    if (this._status !== WagerTransactionStatus.PendingReference) {                             // PENDING -> FAILED não existe (seção 6.3 do desafio)
       throw new InvalidTransactionStateError(`fail só sai de PENDING_REFERENCE, a transação ${this.id} está ${this.status}`);
     }
     this._status = WagerTransactionStatus.Failed;

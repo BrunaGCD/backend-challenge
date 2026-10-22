@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                       CONSUMIDOR SQS DA FILA DE ENTRADA (SEÇÃO 10)
+//                      CONSUMIDOR SQS DA FILA DE ENTRADA (SEÇÃO 10 DO DESAFIO)
 // ====================================================================================================
 // Usa o mesmo caso de uso do HTTP. Ack (DeleteMessage) só depois do commit. Classificação:
 //   sucesso, replay, mensagem já na inbox, rejeição de negócio  -> DeleteMessage

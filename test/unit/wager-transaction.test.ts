@@ -154,7 +154,7 @@ describe("WagerTransaction: consultas", () => {
   });
 });
 
-describe("forma da classe (esqueleto da seção 6.3)", () => {
+describe("forma da classe (esqueleto da seção 6.3 do desafio)", () => {
   test("identidade e negócio são readonly, e o estado da decisão só muda pelas transições", () => {
     // nunca chamada: os @ts-expect-error fazem o typecheck falhar se alguma dessas atribuições passar a compilar
     const changeFromOutside = (transaction: WagerTransaction) => {

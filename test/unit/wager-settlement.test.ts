@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";                                             // runner de testes
 import { FailureCode } from "../../src/domain/failure-code";                                    // motivos
-import { settleWagerTransaction } from "../../src/domain/wager-settlement";                     // regras da seção 7
+import { settleWagerTransaction } from "../../src/domain/wager-settlement";                     // regras da seção 7 do desafio
 import type { Wallet } from "../../src/domain/wallet";                                          // wallet travada
 import { LedgerDirection, type WalletLedgerEntry } from "../../src/domain/wallet-ledger-entry";                // lançamentos
 import { WagerTransactionKind as Kind, WagerTransactionStatus as Status, type WagerTransaction } from "../../src/domain/wager-transaction";

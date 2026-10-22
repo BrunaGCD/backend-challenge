@@ -12,7 +12,7 @@ export function presentWallet(wallet: Wallet, includeUpdatedAt: boolean) {
   return body;
 }
 
-// Mesmo formato em 200, 202 e 422 (seção 9), mais failureCode quando houver.
+// Mesmo formato em 200, 202 e 422 (seção 9 do desafio), mais failureCode quando houver.
 export function presentTransactionResult(transaction: WagerTransaction, idempotentReplay: boolean) {
   const body: Record<string, unknown> = {
     transactionId: transaction.id,

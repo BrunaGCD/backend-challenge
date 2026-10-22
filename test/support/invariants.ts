@@ -1,5 +1,5 @@
 // ====================================================================================================
-//        VERIFICADOR DO FIM DE TODO TESTE DE INTEGRAÇÃO E DE CONCORRÊNCIA (SEÇÃO 13)
+//      VERIFICADOR DO FIM DE TODO TESTE DE INTEGRAÇÃO E DE CONCORRÊNCIA (SEÇÃO 13 DO DESAFIO)
 // ====================================================================================================
 // Para cada wallet tocada, lendo o banco com SQL direto (não pelo ORM da aplicação):
 //   balance == Σ créditos − Σ débitos; balanceBefore de cada lançamento == balanceAfter do anterior;

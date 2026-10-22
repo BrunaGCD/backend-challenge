@@ -1,7 +1,7 @@
 // ====================================================================================================
 //                     DECISÃO DE UMA TRANSAÇÃO: PROCESSAR, REJEITAR OU ESPERAR
 // ====================================================================================================
-// Regras da seção 7 num lugar só. Recebe a wallet já travada e a referência já buscada; muda o estado
+// Regras da seção 7 do desafio num lugar só. Recebe a wallet já travada e a referência já buscada; muda o estado
 // da transação e da wallet em memória e devolve o lançamento, se houve movimento. Quem grava é o caso
 // de uso, dentro da mesma transação SQL.
 import type { RetryPolicy } from "./backoff";                                                   // reagendamento das pendentes

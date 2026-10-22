@@ -1,7 +1,8 @@
 // ====================================================================================================
-//                       CRIAÇÃO DAS FILAS COM A CONFIGURAÇÃO DA SEÇÃO 10
+//                            CRIAÇÃO DAS FILAS DE ENTRADA, DLQ E EVENTOS
 // ====================================================================================================
-// CreateQueue é idempotente quando os atributos são os mesmos, então rodar de novo não estraga nada.
+// Os nomes vêm da seção 10 do desafio; a configuração de cada fila e o porquê estão no ARCHITECTURE §13
+// e §14. CreateQueue é idempotente quando os atributos são os mesmos, então rodar de novo não estraga nada.
 import { CreateQueueCommand, GetQueueAttributesCommand, type SQSClient } from "@aws-sdk/client-sqs";
 
 export interface QueueNames {

@@ -1,5 +1,5 @@
 // ====================================================================================================
-//            POSTGRESQL E SQS TEMPORARIAMENTE INDISPONÍVEIS (PREMISSA DA SEÇÃO 3)
+//          POSTGRESQL E SQS TEMPORARIAMENTE INDISPONÍVEIS (PREMISSA DA SEÇÃO 3 DO DESAFIO)
 // ====================================================================================================
 // A aplicação fala com o banco e com a fila reais através de um proxy TCP que o teste corta e religa.
 //   SQS fora: o HTTP continua processando, os eventos esperam na outbox e saem quando ele volta.
@@ -126,8 +126,9 @@ describe("PostgreSQL fora do ar", () => {
 // ----------------------------------------------------------------------------------------------------
 //                      PostgreSQL FORA COM MENSAGENS CHEGANDO PELA FILA
 // ----------------------------------------------------------------------------------------------------
-// Um consumidor próprio, falando com o banco pelo proxy. O orçamento antigo (3 recebimentos com backoff
-// de até 1 s nos testes) acabava em uns 2 s; as quedas abaixo passam disso.
+// Um consumidor próprio, falando com o banco pelo proxy. As quedas abaixo duram bem mais do que 3
+// recebimentos com o backoff de até 1 s dos testes durariam (uns 2 s), então só terminam sem DLQ porque a
+// mensagem com falha transitória fica com o consumidor, tentando de novo, em vez de voltar para a fila.
 describe("PostgreSQL fora com mensagens na fila", () => {
   async function startConsumerThroughProxy(consumerQueues: TestQueues, record: QueueRecord, retryBudgetMilliseconds: string): Promise<RunningApp> {
     const databaseUrl = new URL(process.env.DATABASE_URL!);
@@ -157,7 +158,7 @@ describe("PostgreSQL fora com mensagens na fila", () => {
     const messages = [1, 2, 3, 4, 5].map(() => wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId, playerId, kind: "BET", amount: "1.00" }));
     for (const message of messages) await sendWagerMessage(consumerQueues.inputQueueName, message);
     await waitUntil("o consumidor pausar", async () => (await pausesOf(consumerApp)) > 0);
-    await Bun.sleep(6_000);                                                                     // bem mais que o orçamento antigo
+    await Bun.sleep(6_000);                                                                     // bem mais que os uns 2 s de 3 recebimentos com backoff
     await databaseProxy.restore();
 
     const externalIds = messages.map((message) => message.data.externalTransactionId);

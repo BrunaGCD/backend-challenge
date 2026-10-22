@@ -31,7 +31,7 @@ function command(body: Record<string, unknown>): WagerCommand {
 }
 
 describe("vetores fixos", () => {
-  test("BET do exemplo da seção 9", () => {
+  test("BET do exemplo da seção 9 do desafio", () => {
     const expectedCanonical = '{"externalTransactionId":"transaction-123","gameId":"fortune-chimp","kind":"BET","money":{"amount":"25.00","currency":"BRL"},"playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1","providerId":"provider-a","roundId":"round-987","walletId":"0192f291-27dd-7d3f-8071-5f8685deef37"}';
     expect(canonicalPayload(command(SPEC_EXAMPLE))).toBe(expectedCanonical);
     expect(computePayloadHash(command(SPEC_EXAMPLE))).toBe("629836932b79106b99523d06a1e7fa80689b0ea1e1c47aa3f0a5a2c87d0c4344");

@@ -1,7 +1,7 @@
 // ====================================================================================================
 //      ENTRADA SÓ DE TESTE: A APLICAÇÃO NORMAL, COM UMA FILA QUE MATA O PROCESSO ANTES DO ACK
 // ====================================================================================================
-// O cenário "worker morto depois do commit e antes do ack" (seção 13). O commit já aconteceu quando o
+// O cenário "worker morto depois do commit e antes do ack" (seção 13 do desafio). O commit já aconteceu quando o
 // consumidor chama o delete; aqui o delete vira um SIGKILL no próprio processo. Banco e fila são os
 // reais: a falha entra pela composição das portas, não por um "modo de teste" no código de produção.
 import { startServer } from "../../src/main";

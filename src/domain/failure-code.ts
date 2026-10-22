@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                       CÓDIGOS DE FALHA GRAVADOS NA TRANSAÇÃO (SEÇÃO 7.2)
+//                   CÓDIGOS DE FALHA GRAVADOS NA TRANSAÇÃO (SEÇÃO 7.2 DO DESAFIO)
 // ====================================================================================================
 // Estáveis: código publicado não muda de significado; código novo é acrescentado, nunca renomeado.
 

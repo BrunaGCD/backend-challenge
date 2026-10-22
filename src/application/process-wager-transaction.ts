@@ -1,8 +1,8 @@
 // ====================================================================================================
 //                 CASO DE USO: PROCESSAR UMA TRANSAÇÃO (HTTP, FILA E WORKER DE PENDENTES)
 // ====================================================================================================
-// O mesmo fluxo atende os três canais (seção 8). A garantia vem do banco: lock da wallet, UNIQUE da
-// idempotency_key e de (provider_id, external_transaction_id), inbox e outbox no mesmo commit.
+// O mesmo fluxo atende os três canais. A garantia vem do banco (seção 8 do desafio): lock da wallet,
+// UNIQUE da idempotency_key e de (provider_id, external_transaction_id), inbox e outbox no mesmo commit.
 import type { RetryPolicy } from "../domain/backoff";                                           // backoff das pendentes
 import { WagerTransactionFailed, WagerTransactionPendingReference, WagerTransactionProcessed, WagerTransactionRejected, WalletBalanceChanged, type EventContext, type IntegrationEvent } from "../domain/events";
 import { FailureCode } from "../domain/failure-code";                                           // PROCESSING_FAILED

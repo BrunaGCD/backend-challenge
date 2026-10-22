@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                     PUBLISHER DA OUTBOX (SEÇÃO 11): UM CICLO, EM TODAS AS INSTÂNCIAS
+//            PUBLISHER DA OUTBOX (SEÇÃO 11 DO DESAFIO): UM CICLO, EM TODAS AS INSTÂNCIAS
 // ====================================================================================================
 // BEGIN; até 10 linhas vencidas com FOR UPDATE SKIP LOCKED; SendMessageBatch; marca publicadas ou
 // reagenda as recusadas; COMMIT. A única duplicação possível é publicar e morrer antes do COMMIT:

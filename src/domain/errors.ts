@@ -1,7 +1,7 @@
 // ====================================================================================================
 //                                       ERROS DE DOMÍNIO
 // ====================================================================================================
-// Cada violação de regra tem o seu tipo; o caso de uso traduz o tipo no failureCode da seção 7.2.
+// Cada violação de regra tem o seu tipo; o caso de uso traduz o tipo no failureCode da seção 7.2 do desafio.
 
 export abstract class DomainError extends Error {
   constructor(message: string) {

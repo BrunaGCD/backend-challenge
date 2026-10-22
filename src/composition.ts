@@ -72,7 +72,8 @@ export async function composeApplication(config: AppConfig, overrides: Compositi
   // ----------------------------------------------------------------------------------------------------
   const orm = await createOrm({ databaseUrl: config.database.url, poolMax: config.database.poolMax, idleInTransactionTimeoutMilliseconds: config.database.idleInTransactionTimeoutMilliseconds, connectTimeoutMilliseconds: config.database.connectTimeoutMilliseconds });
   // dois runners sobre o mesmo pool: no HTTP alguém espera a resposta, então a espera pelo lock é curta
-  // (503 e o provedor reenvia); na fila e no worker ninguém espera, e desistir cedo gasta um recebimento
+  // (503 e o provedor reenvia); na fila, no worker e no publisher ninguém espera, e desistir cedo só gasta
+  // mais uma tentativa
   const database = new MikroOrmDatabase(orm, { lockTimeout: config.database.lockTimeout, statementTimeout: config.database.statementTimeout });
   const backgroundDatabase = new MikroOrmDatabase(orm, { lockTimeout: config.database.backgroundLockTimeout, statementTimeout: config.database.backgroundStatementTimeout });
   const realRepositories: Repositories = {

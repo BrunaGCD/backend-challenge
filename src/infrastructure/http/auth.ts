@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                    AUTENTICAÇÃO: PONTO DE EXTENSÃO EXPLÍCITO (SEÇÃO 2)
+//                  AUTENTICAÇÃO: PONTO DE EXTENSÃO EXPLÍCITO (SEÇÃO 2 DO DESAFIO)
 // ====================================================================================================
 // Sem Identity Provider integrado, o adaptador da porta é um no-op que não restringe nada. O desenho
 // com Keycloak (client credentials, JWT validado com jose pelo JWKS) está no ARCHITECTURE.md; para

@@ -15,7 +15,7 @@ import { ProblemDetailsFilter, sendProblem } from "./problem-details";
 
 const APPLICATION = "APPLICATION";                                                              // só o ciclo de vida recebe a aplicação montada inteira
 
-// passos do SIGTERM (seção 10): readiness em 503, consumidor e laços param, HTTP fecha, pool fecha
+// passos do SIGTERM (seção 10 do desafio): readiness em 503, consumidor e laços param, HTTP fecha, pool fecha
 @Injectable()
 class ShutdownCoordinator implements BeforeApplicationShutdown, OnApplicationShutdown {
   constructor(@Inject(APPLICATION) private readonly application: Application) {}

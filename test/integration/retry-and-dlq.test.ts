@@ -360,8 +360,8 @@ describe("fila", () => {
     expect(await drainQueue(batchQueues.deadLetterQueueName, 300)).toHaveLength(0);
   });
 
-  // Antes, a busca só saía de novo quando o lote inteiro terminava, então a mensagem de uma wallet presa,
-  // tentando de novo dentro do orçamento, segurava as mensagens de todas as outras wallets da instância.
+  // Se a busca só saísse de novo quando o lote inteiro terminasse, a mensagem de uma wallet presa, tentando
+  // de novo dentro do orçamento, seguraria as mensagens de todas as outras wallets da instância.
   test("uma wallet presa não segura as outras: com a mensagem da wallet A tentando de novo, a da wallet B, livre, vira transação em poucos segundos, e a seguinte de A só chega depois da primeira", async () => {
     const { stuck, ownQueues, record, consumerApp, lock, stuckMessage, freeMessage, waitOrReport } = await stuckWalletScenario();
     const nextStuckMessage = wagerMessage(`msg-${Bun.randomUUIDv7()}`, { walletId: stuck.walletId, playerId: stuck.playerId, kind: "BET", amount: "2.00" });

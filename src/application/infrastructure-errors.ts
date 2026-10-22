@@ -5,6 +5,9 @@
 // O resto é inesperado: 500 no HTTP, retry na fila (nada foi gravado), FAILED no worker.
 // Dentro dos transitórios, banco indisponível ou saturado é o caso em que o problema não é da operação:
 // o consumidor da fila para de buscar mensagens até o banco responder de novo.
+// Fica na aplicação porque os casos de uso decidem com ela (consultar de novo depois de uma violação de
+// unicidade, o tipo do conflito na métrica). Ela só lê os campos code, constraint e message do erro, sem
+// importar o driver, então a aplicação continua sem depender da infraestrutura.
 import { ConcurrentUpdateError } from "./errors";                                               // conflito que aparece no flush
 
 const DATABASE_UNAVAILABLE_SQLSTATES = new Set([

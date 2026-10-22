@@ -1,5 +1,5 @@
 // ====================================================================================================
-//            INVARIANTE FINAL: SALDO DA WALLET == SALDO RECONSTRUÍDO PELO LEDGER (SEÇÃO 13)
+//     INVARIANTE FINAL: SALDO DA WALLET == SALDO RECONSTRUÍDO PELO LEDGER (SEÇÃO 13 DO DESAFIO)
 // ====================================================================================================
 // Usado nos testes de unidade da Wallet (com os lançamentos devolvidos por debit/credit) e, pelo
 // verificador do banco, nos testes de integração e concorrência.

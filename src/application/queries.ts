@@ -25,7 +25,7 @@ export interface ReconciliationResult {
 }
 
 // ----------------------------------------------------------------------------------------------------
-//                CURSOR OPACO: {"after": <wallet_version>} EM BASE64URL (SEÇÃO 9)
+//            CURSOR OPACO: {"after": <wallet_version>} EM BASE64URL (SEÇÃO 9 DO DESAFIO)
 // ----------------------------------------------------------------------------------------------------
 export function encodeLedgerCursor(afterWalletVersion: number): string {
   return Buffer.from(JSON.stringify({ after: afterWalletVersion }), "utf8").toString("base64url");

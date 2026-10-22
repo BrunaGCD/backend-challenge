@@ -1,5 +1,5 @@
 // ====================================================================================================
-//                              EVENTOS DE INTEGRAÇÃO (SEÇÃO 11)
+//                            EVENTOS DE INTEGRAÇÃO (SEÇÃO 11 DO DESAFIO)
 // ====================================================================================================
 // Envelope abstrato e uma subclasse por evento: eventType e version ficam no tipo, não numa string
 // solta no call site. data carrega MoneyProps (string decimal), nunca a instância de Money.
