@@ -124,7 +124,7 @@ Para simular o crash de uma instância, mate o processo do Bun dentro do contain
 
 ## Configuração
 
-Todos os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, com um valor inicial escolhido como padrão. A lista está em [.env.example](.env.example); o Bun lê um `.env` automaticamente se você copiar o exemplo. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
+Os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, cada uma com um padrão no código ([src/config.ts](src/config.ts)). A lista completa, agrupada por assunto e com esses mesmos padrões, está em [.env.example](.env.example): copiar o exemplo para `.env` não muda nada até você mudar um valor, e o Bun lê o `.env` sozinho fora do Docker. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
 
 ## Estrutura
 
