@@ -1,7 +1,7 @@
 // ====================================================================================================
 //                       ERROS DA APLICAÇÃO (OS QUE NÃO VIRAM TRANSAÇÃO GRAVADA)
 // ====================================================================================================
-// Cada um tem um code estável (a tabela do ARCHITECTURE §10); a borda (HTTP ou fila) decide o status e a ação.
+// Cada um tem um code estável (a tabela de docs/regras-de-negocio.md); a borda (HTTP ou fila) decide o status e a ação.
 
 export interface FieldError {
   field: string;

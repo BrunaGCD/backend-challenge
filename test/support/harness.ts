@@ -64,7 +64,7 @@ export async function createTestQueues(prefix: string, settings = TEST_QUEUE_SET
   return queues;
 }
 
-// valores curtos para TTL, visibilidade e backoff, para o teste ser rápido e determinístico (ARCHITECTURE §17)
+// valores curtos para TTL, visibilidade e backoff, para o teste ser rápido e determinístico (docs/testes.md)
 export function testEnvironment(queues: TestQueues, extra: Record<string, string> = {}): Record<string, string> {
   return {
     DATABASE_URL: process.env.DATABASE_URL ?? "",
@@ -226,7 +226,7 @@ export async function submitWager(baseUrl: string, input: WagerInput, idempotenc
   return httpRequest(baseUrl, "POST", "/wagering/transactions", body, { "Idempotency-Key": idempotencyKey ?? `${body.providerId}:${body.externalTransactionId}` });
 }
 
-// O provedor reenvia com a mesma key quando recebe 503 (lock_timeout numa wallet disputada, ARCHITECTURE §5)
+// O provedor reenvia com a mesma key quando recebe 503 (lock_timeout numa wallet disputada, docs/banco-de-dados.md)
 // ou quando a conexão cai antes da resposta: as duas situações são seguras por causa da idempotência.
 // Os testes de concorrência fazem o papel do provedor e contam quantas vezes isso aconteceu.
 export interface ProviderRetryCounter {

@@ -1,7 +1,7 @@
 // ====================================================================================================
 //       CONSUMIDOR DE EVENTOS DE EXEMPLO (SÓ DE TESTE): DEDUPLICA PELO eventId NO COMMIT DO EFEITO
 // ====================================================================================================
-// O projeto não tem consumidor dos eventos de integração; este mostra o contrato do ARCHITECTURE §14
+// O projeto não tem consumidor dos eventos de integração; este mostra o contrato de docs/fila-e-outbox.md
 // funcionando. O efeito escolhido não é idempotente por natureza (somar o valor movimentado por
 // wallet), então uma cópia aplicada duas vezes apareceria na soma. A deduplicação é a mesma ideia da
 // inbox da aplicação: INSERT do eventId com ON CONFLICT DO NOTHING, na mesma transação do efeito.

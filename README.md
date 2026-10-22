@@ -2,16 +2,30 @@
 
 Serviço que processa as operações de aposta (`BET`, `WIN`, `LOSS`, `REFUND`, `ROLLBACK`) que provedores de jogos mandam por HTTP e por uma fila SQS, mantendo o saldo de cada wallet e um ledger imutável. O problema central é que a entrega é at-least-once: a mesma aposta pode chegar duas vezes, um `REFUND` pode chegar antes da `BET` que ele desfaz, e três instâncias podem mexer na mesma wallet ao mesmo tempo, então o serviço precisa continuar certo nesses casos sem duplicar débito ou crédito e sem deixar saldo negativo.
 
-As decisões, os trade-offs e as limitações estão no [ARCHITECTURE.md](ARCHITECTURE.md). Este arquivo diz como subir, usar e testar.
+## Como a documentação está organizada
+
+A documentação tem três níveis, do mais curto ao mais detalhado, para cada pessoa ler só até onde precisar:
+
+- **Este README** diz como subir, usar e testar o projeto.
+- **O [ARCHITECTURE.md](ARCHITECTURE.md)** resume as decisões: o que decidi em cada assunto, por quê e o que custa. É a leitura para entender o projeto.
+- **A pasta [`docs/`](docs/)** tem o detalhe de cada assunto, para quem quiser conferir uma decisão a fundo:
+
+| Documento | Assunto |
+|---|---|
+| [regras-de-negocio.md](docs/regras-de-negocio.md) | estados da transação, interpretações das regras, referências fora de ordem e códigos de falha |
+| [api-http.md](docs/api-http.md) | status e corpos da API, idempotência e o algoritmo do `payloadHash`, reconciliação e cursor do ledger |
+| [banco-de-dados.md](docs/banco-de-dados.md) | uso do MikroORM, lock e concorrência, todas as garantias do schema e o patch do kysely |
+| [fila-e-outbox.md](docs/fila-e-outbox.md) | a vida de uma mensagem na fila, retry, DLQ, desligamento, outbox e o contrato dos eventos |
+| [testes.md](docs/testes.md) | como rodar a suíte e o que cada arquivo de teste prova |
+| [operacao.md](docs/operacao.md) | portas, migrations à mão, como simular quedas e crash, cuidados no Windows |
+| [medicoes-e-historico.md](docs/medicoes-e-historico.md) | resultado dos experimentos, números medidos e os desenhos anteriores que levaram ao atual |
 
 ## O que precisa estar instalado
 
 - Docker com Docker Compose (testei com Docker 29.8 e Compose 5.6).
 - [Bun 1.4.3](https://bun.sh) só se for rodar os testes ou a aplicação fora do Docker.
 
-Não precisa de conta em lugar nenhum: o SQS é emulado pelo MiniStack (imagem [`ministackorg/ministack:1.5.30`](https://hub.docker.com/r/ministackorg/ministack)), que sobe sem token.
-
-No Windows, clonar numa pasta funda pode falhar com "Filename too long", porque o caminho da pasta somado ao dos arquivos mais fundos do projeto (as migrations, por exemplo) passa do limite de 260 caracteres do Windows; `git config --global core.longpaths true` antes do clone resolve, e clonar perto da raiz (`C:\src`, por exemplo) também.
+Não precisa de conta em lugar nenhum: o SQS é emulado pelo MiniStack (imagem [`ministackorg/ministack:1.5.30`](https://hub.docker.com/r/ministackorg/ministack)), que sobe sem token. No Windows, clone perto da raiz da unidade ou rode `git config --global core.longpaths true` antes do clone ([por quê](docs/operacao.md#windows)).
 
 ## Subir tudo
 
@@ -27,27 +41,9 @@ Isso sobe o PostgreSQL, o MiniStack, roda as migrations (serviço `migrate`), cr
 | `app-2` | http://localhost:3002 |
 | `app-3` | http://localhost:3003 |
 
-As portas do computador podem ser trocadas se alguma já estiver ocupada (um PostgreSQL local, por exemplo): `POSTGRES_PORT`, `SQS_PORT`, `APP_1_PORT`, `APP_2_PORT` e `APP_3_PORT`, como em `POSTGRES_PORT=55432 docker compose up -d --build`. Dentro do Docker nada muda; só quem roda fora dele (o caminho "Na máquina, com o Bun", abaixo) precisa apontar `DATABASE_URL` ou `SQS_ENDPOINT` para a porta nova.
+Para ver se estão prontas: `docker compose ps` (as três aparecem `healthy`) ou `curl localhost:3001/health/ready`, que confere a conexão com o banco, as tabelas e a fila de entrada. Se alguma porta já estiver ocupada no seu computador, dá para trocá-la ([portas](docs/operacao.md#portas-ocupadas)).
 
-Para ver se estão prontas: `docker compose ps` (as três aparecem `healthy`) ou `curl localhost:3001/health/ready`. A readiness confere a conexão com o banco, as tabelas e a fila de entrada, então uma instância apontando para um banco sem as migrations aparece como não pronta.
-
-Para derrubar: `docker compose down`. Os dados do banco ficam no volume `postgres-data`, então sobrevivem a um `down` e a uma recriação do container. Para começar do zero, apagando o volume:
-
-```sh
-docker compose down -v
-```
-
-### Migrations
-
-Rodam sozinhas no `docker compose up`. Para rodar à mão (com o PostgreSQL do compose de pé e o Bun instalado):
-
-```sh
-bun install
-bun run migrate:up      # aplica as pendentes
-bun run migrate:down    # desfaz só a última
-```
-
-As migrations ficam em `src/infrastructure/persistence/migrations/`, cada uma com `up` e `down` escritos à mão.
+Para derrubar: `docker compose down`. Os dados do banco ficam no volume `postgres-data`, então sobrevivem a um `down`; para começar do zero, `docker compose down -v`.
 
 ## Usar a API
 
@@ -80,7 +76,7 @@ Os outros endpoints:
 | `GET /health/live` e `GET /health/ready` | liveness e readiness (banco e fila) |
 | `GET /metrics` | métricas no formato do Prometheus |
 
-Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo (o corpo segue o formato da seção 10 do desafio, e o contrato da fila está no ARCHITECTURE.md, §13). Os eventos publicados saem em `wagering-events.fifo`. Para mandar uma operação pela fila sem escrever código, há um script que monta a mensagem nesse formato e roda pelo container de testes (que já tem o endereço do MiniStack):
+Pela fila, a mensagem vai para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId` e `MessageDeduplicationId` igual ao `messageId` do corpo, que segue o formato da seção 10 do desafio ([contrato da fila](docs/fila-e-outbox.md#as-filas-e-o-contrato)). Os eventos publicados saem em `wagering-events.fifo`. Para mandar uma operação pela fila sem escrever código, há um script que monta a mensagem e roda pelo container de testes:
 
 ```sh
 docker compose run --rm --no-deps tests bun scripts/send-wager-message.ts \
@@ -91,52 +87,32 @@ Ele imprime a mensagem enviada e o caminho para consultar o resultado (`GET /pro
 
 ## Rodar os testes
 
-Os testes de integração e de concorrência usam o PostgreSQL e o MiniStack de verdade, do próprio compose, e cada execução cria um banco novo (`wagering_test_<data>_<pid>_<sufixo aleatório>`), porque os triggers do ledger impedem apagar lançamentos para limpar as tabelas.
-
-### Dentro do Docker (o caminho que funciona igual em qualquer sistema)
+Com a stack de pé, a suíte inteira roda dentro do Docker, igual em qualquer sistema:
 
 ```sh
 docker compose up -d --build
 docker compose run --rm --no-deps tests
 ```
 
-O serviço `tests` usa a mesma imagem da aplicação e roda `bun run test` em Linux, contra o PostgreSQL e o MiniStack que o `up` já subiu. O `--no-deps` faz o Compose usar esses containers como estão, sem recriar nenhum: sem ele, de vez em quando o Compose recriava o PostgreSQL antes de rodar os testes. A imagem é construída a partir do código, então depois de mudar alguma coisa é preciso o `--build` de novo.
+São testes de unidade, de integração e de concorrência; os dois últimos usam o PostgreSQL e o MiniStack de verdade, e os de concorrência sobem 3 processos da aplicação. Como rodar na máquina com o Bun, e o que cada arquivo de teste prova, está em [testes](docs/testes.md).
 
-### Na máquina, com o Bun
+## Estrutura do código
 
-```sh
-bun install
-docker compose up -d postgres ministack
-
-bun test test/unit           # unidade: não precisa de nada de pé
-bun run test:integration     # integração: banco e fila reais
-bun run test:concurrency     # concorrência: sobe 3 processos da aplicação com Bun.spawn
-bun run test                 # os três em sequência
-```
-
-No Windows, o teste de desligamento gracioso (`SIGTERM`) é pulado, porque o Windows não entrega `SIGTERM` para o processo (o resultado do experimento E1 está no ARCHITECTURE.md). No Docker ele roda.
-
-Também há `bun run typecheck` (TypeScript estrito) e `bun run lint` (inclusive a regra que impede o domínio e a aplicação de importar NestJS, MikroORM ou a infraestrutura).
-
-Para simular o SQS fora do ar no compose, tire o MiniStack da rede em vez de pará-lo, porque ele guarda as filas só em memória e um `docker compose stop ministack` as apaga: `docker network disconnect backend-challenge-main_default backend-challenge-main-ministack-1` derruba, e `docker network connect --alias ministack backend-challenge-main_default backend-challenge-main-ministack-1` traz de volta, com o nome `ministack` que as instâncias usam (os nomes da rede e do container vêm da pasta do projeto; `docker network ls` e `docker compose ps` mostram os seus).
-
-Para simular o crash de uma instância, mate o processo do Bun dentro do container: `docker compose exec app-2 sh -c 'kill -9 $(grep -lx bun /proc/[0-9]*/comm | cut -d/ -f3)'` (a imagem não tem `ps` nem `pgrep`, então o PID sai do `/proc`), e o `restart: unless-stopped` a traz de volta em menos de 1 s. Um `docker kill` não serve para isso, porque o Docker o trata como parada manual e a instância fica parada até um `docker compose start app-2`.
-
-## Configuração
-
-Os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, cada uma com um padrão no código ([src/config.ts](src/config.ts)). A lista completa, agrupada por assunto e com esses mesmos padrões, está em [.env.example](.env.example): copiar o exemplo para `.env` não muda nada até você mudar um valor, e o Bun lê o `.env` sozinho fora do Docker. As credenciais do compose e do exemplo são fictícias, só para os containers locais.
-
-## Estrutura
+O código segue a arquitetura em camadas do DDD, e dentro do domínio e da aplicação os arquivos ficam agrupados nos três módulos do serviço. Uma regra de lint impede o domínio e a aplicação de importar NestJS, MikroORM ou a infraestrutura.
 
 ```
 src/
-  domain/            Money, Wallet, WalletLedgerEntry, WagerTransaction, eventos, inbox/outbox e as regras (sem NestJS nem ORM)
-  application/       casos de uso, portas, validação do comando, payloadHash, publisher da outbox
+  domain/            Money, erros, backoff e eventos; wallet/, wagering/ e messaging/ com as entidades e as regras
+  application/       portas, erros e consultas; wallet/, wagering/ e messaging/ com os casos de uso
   infrastructure/    MikroORM (registros, repositórios, migrations), SQS (consumidor, publicação), HTTP (NestJS)
   observability/     logs (pino) e métricas (prom-client)
   composition.ts     monta todas as peças; os testes trocam uma porta por aqui para injetar falha
 test/
   unit/  integration/  concurrency/  support/
 experiments/         os roteiros dos experimentos E1 e E2, rodados antes da implementação
-patches/             patch do kysely aplicado pelo bun install (o porquê está no ARCHITECTURE.md, §18)
+patches/             patch do kysely aplicado pelo bun install
 ```
+
+## Configuração
+
+Os números ajustáveis (timeouts, TTL, backoff, tamanho do pool, nomes das filas) vêm de variáveis de ambiente, cada uma com um padrão no código ([src/config.ts](src/config.ts)). A lista completa, agrupada por assunto e com esses mesmos padrões, está em [.env.example](.env.example): copiar o exemplo para `.env` não muda nada até você mudar um valor, e o Bun lê o `.env` sozinho fora do Docker. As credenciais do compose e do exemplo são fictícias, só para os containers locais.

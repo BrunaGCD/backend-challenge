@@ -1,6 +1,6 @@
 # Experimentos
 
-Roteiros descartáveis rodados antes da implementação, para decidir o ORM (E1) e o emulador do SQS (E2). O resultado de cada item e a decisão estão no `ARCHITECTURE.md`.
+Roteiros descartáveis rodados antes da implementação, para decidir o ORM (E1) e o emulador do SQS (E2). O resultado de cada item está em `docs/medicoes-e-historico.md`, e a decisão, no `ARCHITECTURE.md`.
 
 Com o `docker compose up -d postgres ministack` rodando:
 
