@@ -34,6 +34,26 @@ async function inputQueueIsEmpty(): Promise<boolean> {
   return Number(response.Attributes?.ApproximateNumberOfMessages) === 0 && Number(response.Attributes?.ApproximateNumberOfMessagesNotVisible) === 0;
 }
 
+// segura o lock da wallet numa transação por fora, até o teste soltar (a mesma técnica do retry-and-dlq.test.ts)
+async function holdWalletLock(walletId: string): Promise<{ release: () => Promise<void> }> {
+  let releaseLock: () => void = () => {};
+  let lockHeld: () => void = () => {};
+  const lockHeldPromise = new Promise<void>((resolve) => { lockHeld = resolve; });
+  const holder = testSql().begin(async (transaction) => {
+    await transaction`select id from wallets where id = ${walletId} for update`;
+    lockHeld();
+    await new Promise<void>((resolve) => { releaseLock = resolve; });
+  });
+  await lockHeldPromise;
+  return { release: async () => { releaseLock(); await holder; } };
+}
+
+// sessões deste banco paradas esperando um lock num SELECT ... FOR UPDATE (as instâncias esperando a wallet)
+async function sessionsWaitingForUpdateLock(): Promise<number> {
+  const [row] = await testSql()`select count(*)::int as total from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query ilike '%for update%'`;
+  return row.total;
+}
+
 async function ledgerDebits(walletId: string): Promise<number> {
   const [row] = await testSql()`select count(*)::int as total from wallet_ledger_entries where wallet_id = ${walletId} and direction = 'DEBIT'`;
   return row.total;
@@ -69,8 +89,11 @@ afterAll(async () => {
   await Promise.all(instances.map((instance) => stopInstance(instance, "SIGKILL")));
 });
 
+// A concorrência de verdade aqui vem das 40 cópias por HTTP, espalhadas pelas 3 instâncias. As 10 pela fila
+// vão no mesmo MessageGroupId (a wallet), então o FIFO as entrega uma por vez: elas disputam com o HTTP,
+// mas não entre si.
 describe("cenário 1: a mesma aposta enviada 50 vezes em paralelo", () => {
-  test("40 cópias por HTTP nas 3 instâncias e 10 pela fila: um único débito", async () => {
+  test("40 cópias por HTTP nas 3 instâncias, ao mesmo tempo, e 10 pela fila, uma por vez: um único débito", async () => {
     const { walletId, playerId } = await newWallet("100.00");
     const bet = { walletId, playerId, kind: "BET", amount: "30.00", externalTransactionId: `bet-${Bun.randomUUIDv7()}` };
 
@@ -88,13 +111,25 @@ describe("cenário 1: a mesma aposta enviada 50 vezes em paralelo", () => {
   });
 });
 
+// Para as duas apostas se sobreporem de fato no banco, o teste trava a wallet por fora, dispara as duas, espera
+// o PostgreSQL mostrar as duas paradas no lock e só então solta. Sem o lock da wallet, as duas leriam 100.00.
 describe("cenário 2: duas apostas de 80.00 disputando 100.00", () => {
-  test("em 10 wallets, cada uma com as duas apostas em instâncias diferentes ao mesmo tempo", async () => {
+  test("em 10 wallets, cada uma com as duas apostas em instâncias diferentes esperando o mesmo lock", async () => {
     for (let round = 0; round < 10; round++) {
       const { walletId, playerId } = await newWallet("100.00");
       const first = { walletId, playerId, kind: "BET", amount: "80.00", externalTransactionId: `bet-a-${Bun.randomUUIDv7()}` };
       const second = { walletId, playerId, kind: "BET", amount: "80.00", externalTransactionId: `bet-b-${Bun.randomUUIDv7()}` };
-      const responses = await Promise.all([send(round, first), send(round + 1, second)]);
+
+      const lock = await holdWalletLock(walletId);
+      const serviceUnavailableBefore = retryCounter.serviceUnavailable;
+      const bothBets = Promise.all([send(round, first), send(round + 1, second)]);
+      try {
+        await waitUntil("as duas apostas esperando o lock da wallet", async () => (await sessionsWaitingForUpdateLock()) === 2, 1_500, 20);   // solta bem antes dos 2 s de lock_timeout do HTTP
+      } finally {
+        await lock.release();                                                                   // solta mesmo se a espera falhar, para não deixar a wallet travada
+      }
+      const responses = await bothBets;
+      expect(retryCounter.serviceUnavailable).toBe(serviceUnavailableBefore);                  // nenhuma desistiu do lock: as duas saíram da mesma espera
 
       const statuses = responses.map((response) => response.body.status).sort();
       expect(statuses).toEqual(["PROCESSED", "REJECTED"]);                                     // exatamente uma de cada
