@@ -11,6 +11,8 @@ As decisões, os trade-offs e as limitações estão no [ARCHITECTURE.md](ARCHIT
 
 Não precisa de conta em lugar nenhum: o SQS é emulado pelo MiniStack (imagem [`ministackorg/ministack:1.5.30`](https://hub.docker.com/r/ministackorg/ministack)), que sobe sem token.
 
+No Windows, clonar numa pasta funda pode falhar com "Filename too long", porque o caminho da pasta somado ao dos arquivos mais fundos do projeto (as migrations, por exemplo) passa do limite de 260 caracteres do Windows; `git config --global core.longpaths true` antes do clone resolve, e clonar perto da raiz (`C:\src`, por exemplo) também.
+
 ## Subir tudo
 
 ```sh
@@ -117,6 +119,8 @@ No Windows, o teste de desligamento gracioso (`SIGTERM`) é pulado, porque o Win
 Também há `bun run typecheck` (TypeScript estrito) e `bun run lint` (inclusive a regra que impede o domínio e a aplicação de importar NestJS, MikroORM ou a infraestrutura).
 
 Para simular o SQS fora do ar no compose, tire o MiniStack da rede em vez de pará-lo, porque ele guarda as filas só em memória e um `docker compose stop ministack` as apaga: `docker network disconnect backend-challenge-main_default backend-challenge-main-ministack-1` derruba, e `docker network connect --alias ministack backend-challenge-main_default backend-challenge-main-ministack-1` traz de volta, com o nome `ministack` que as instâncias usam (os nomes da rede e do container vêm da pasta do projeto; `docker network ls` e `docker compose ps` mostram os seus).
+
+Para simular o crash de uma instância, mate o processo do Bun dentro do container: `docker compose exec app-2 sh -c 'kill -9 $(grep -lx bun /proc/[0-9]*/comm | cut -d/ -f3)'` (a imagem não tem `ps` nem `pgrep`, então o PID sai do `/proc`), e o `restart: unless-stopped` a traz de volta em menos de 1 s. Um `docker kill` não serve para isso, porque o Docker o trata como parada manual e a instância fica parada até um `docker compose start app-2`.
 
 ## Configuração
 
